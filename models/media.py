@@ -12,7 +12,8 @@ class TrailMedia(BaseModel):
         super().__init__(**kwargs)
         self.id = kwargs.get('id')
         self.trail_id = kwargs.get('trail_id')
-        self.media_type = kwargs.get('media_type')  # 'image', 'photo_360', 'photo_180'
+        self.trail_point_id = kwargs.get('trail_point_id')
+        self.media_type = kwargs.get('media_type')  # 'image', 'photo_360', 'photo_180', 'video'
         self.url = kwargs.get('url')
         self.thumbnail_url = kwargs.get('thumbnail_url')
         self.order_index = kwargs.get('order_index')
@@ -26,4 +27,6 @@ class TrailMedia(BaseModel):
             result['id'] = str(result['id'])
         if result.get('trail_id'):
             result['trail_id'] = str(result['trail_id'])
+        if result.get('trail_point_id'):
+            result['trail_point_id'] = str(result['trail_point_id'])
         return result
