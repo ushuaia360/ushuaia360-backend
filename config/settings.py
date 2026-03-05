@@ -22,6 +22,9 @@ class Config:
     JSON_SORT_KEYS = False
     JSONIFY_PRETTYPRINT_REGULAR = True
     
+    # Flask/Quart options
+    PROVIDE_AUTOMATIC_OPTIONS = True
+    
     # Base de datos
     DATABASE_URL = os.getenv('DATABASE_URL')
     
