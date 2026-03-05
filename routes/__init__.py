@@ -4,6 +4,7 @@ Registro de todas las rutas
 from quart import Blueprint
 from routes.health import health_bp
 from routes.api import api_bp
+from routes.auth import auth_bp
 
 
 def register_routes(app):
@@ -13,3 +14,6 @@ def register_routes(app):
     
     # Blueprint para API v1
     app.register_blueprint(api_bp, url_prefix='/api/v1')
+    
+    # Blueprint para autenticación
+    app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')

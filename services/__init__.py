@@ -1,5 +1,3 @@
 """
-Servicios - Lógica de negocio
+Services module
 """
-# Importar servicios aquí cuando se creen
-# from services.example_service import ExampleService

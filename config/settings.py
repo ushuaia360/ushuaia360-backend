@@ -22,8 +22,19 @@ class Config:
     JSON_SORT_KEYS = False
     JSONIFY_PRETTYPRINT_REGULAR = True
     
-    # Base de datos (cuando se agregue)
-    # DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///app.db')
+    # Base de datos
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    
+    # JWT
+    JWT_SECRET = os.getenv('JWT_SECRET', SECRET_KEY)
+    JWT_EXPIRATION_SECONDS = int(os.getenv('JWT_EXPIRATION_SECONDS', 60 * 60 * 24 * 14))  # 14 days
+    
+    # Resend
+    RESEND_API_KEY = os.getenv('RESEND_API_KEY')
+    RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', 'noreply@ushuaia360.com')
+    
+    # Frontend URL
+    FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
     
     # API
     API_VERSION = '1.0'

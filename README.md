@@ -46,11 +46,31 @@ source venv/bin/activate  # En Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Configurar variables de entorno (opcional):
+3. Configurar variables de entorno:
 ```bash
-cp .env.example .env
+cp env.example .env
 # Editar .env con tus configuraciones
 ```
+
+### Variables de Entorno Requeridas
+
+Copia `env.example` a `.env` y completa las siguientes variables:
+
+- **DATABASE_URL**: URL de conexión a Supabase PostgreSQL
+  - Formato: `postgresql://postgres:[PASSWORD]@[PROJECT_REF].supabase.co:5432/postgres`
+  - O usar pooler: `postgresql://postgres.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres`
+
+- **SECRET_KEY**: Clave secreta para la aplicación (generar una aleatoria y segura)
+
+- **JWT_SECRET**: Clave secreta para firmar tokens JWT (puede ser igual a SECRET_KEY)
+
+- **RESEND_API_KEY**: API Key de Resend para envío de emails (obtener en https://resend.com)
+
+- **RESEND_FROM_EMAIL**: Email desde el cual se envían los correos
+
+- **FRONTEND_URL**: URL del frontend (usado en emails de verificación)
+
+- **CORS_ORIGINS**: URLs permitidas para CORS, separadas por comas
 
 ## Ejecución
 
@@ -68,10 +88,22 @@ La API estará disponible en `http://localhost:5000`
 
 ## Endpoints
 
-- `GET /` - Endpoint raíz con información básica
+### Health & Status
 - `GET /health` - Health check
 - `GET /api/v1/status` - Estado de la API
-- `GET /api/v1/example` - Endpoint de ejemplo
+
+### Autenticación (`/api/v1/auth`)
+- `POST /register` - Registro de usuario
+- `POST /login` - Login web (con cookies)
+- `POST /login-app` - Login mobile app (retorna token)
+- `GET /me` - Obtener usuario actual (web, desde cookies)
+- `GET /me-app` - Obtener usuario actual (mobile, desde Authorization header)
+- `GET /users` - Listar usuarios (solo admin)
+- `POST /verify-email` - Verificar email con token
+- `POST /resend-verification` - Reenviar email de verificación
+- `POST /change-password` - Cambiar contraseña
+- `POST /forgot-password` - Solicitar reset de contraseña
+- `POST /logout` - Cerrar sesión
 
 ## Arquitectura
 

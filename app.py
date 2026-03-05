@@ -8,6 +8,7 @@ from config.settings import Config
 from routes import register_routes
 from middleware.error_handler import register_error_handlers
 from middleware.request_handler import register_middleware
+from db import init_db
 
 # Configuración de logging
 logging.basicConfig(
@@ -25,7 +26,13 @@ def create_app(config_class=Config):
     app.config.from_object(config_class)
     
     # Habilitar CORS
-    app = cors(app, allow_origin=app.config.get('CORS_ORIGINS', '*'))
+    app = cors(app, allow_origin=app.config.get('CORS_ORIGINS', '*'), allow_credentials=True)
+    
+    # Inicializar base de datos
+    @app.before_serving
+    async def startup():
+        await init_db()
+        logger.info("Base de datos inicializada correctamente")
     
     # Registrar middleware
     register_middleware(app)
