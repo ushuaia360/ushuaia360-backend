@@ -541,14 +541,11 @@ async def forgot_password():
         user = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email.lower())
 
         if not user:
-            # Don't reveal if user exists
             return jsonify({"message": "Si el email existe, se envió un enlace para restablecer la contraseña"}), 200
 
-        # Generate reset token
         reset_token = generate_jwt_token(str(user["id"]), 60 * 60)  # 1 hour
         reset_expires = datetime.datetime.utcnow() + datetime.timedelta(hours=1)
 
-        # Update user with reset token
         await conn.execute(
             """
             UPDATE users 
