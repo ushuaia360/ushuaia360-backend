@@ -151,4 +151,26 @@ class TrailPoint(BaseModel):
         # Convertir Decimal a float
         if isinstance(result.get('km_marker'), Decimal):
             result['km_marker'] = float(result['km_marker'])
+        # Convertir location de geography a coordenadas
+        if result.get('location'):
+            location = result['location']
+            # Si es un string WKT, intentar parsearlo
+            if isinstance(location, str):
+                # Formato: POINTZ(lon lat elevation) o POINT(lon lat)
+                import re
+                match = re.search(r'POINTZ?\s*\(([^)]+)\)', location)
+                if match:
+                    coords = match.group(1).strip().split()
+                    if len(coords) >= 2:
+                        lon = float(coords[0])
+                        lat = float(coords[1])
+                        elevation = float(coords[2]) if len(coords) > 2 else 0
+                        result['location'] = {
+                            'longitude': lon,
+                            'latitude': lat,
+                            'elevation': elevation
+                        }
+            # Si ya es un dict, mantenerlo
+            elif isinstance(location, dict):
+                result['location'] = location
         return result

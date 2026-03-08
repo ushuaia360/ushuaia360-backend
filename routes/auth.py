@@ -138,10 +138,10 @@ async def register():
     }), 201
 
 
-# Login Web (with cookies)
+# Login Web (with cookies) - Solo para admin
 @auth_bp.route("/login", methods=["POST"])
 async def login():
-    """Login for web (sets cookie)"""
+    """Login for web admin panel (sets cookie) - Solo usuarios admin"""
     data = await request.get_json()
     email = data.get("email")
     password = data.get("password")
@@ -165,6 +165,10 @@ async def login():
 
         if not user.get("email_verified", False):
             return jsonify({"error": "Cuenta no verificada, revisá tu email"}), 403
+
+        # Verificar que el usuario sea admin
+        if not user.get("is_admin", False):
+            return jsonify({"error": "No tenés permisos de administrador"}), 403
 
     # Generate token
     token = generate_jwt_token(str(user["id"]))

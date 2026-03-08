@@ -85,6 +85,76 @@ def generate_slug(name: str) -> str:
     return slug
 
 
+@trails_bp.route("/trails", methods=["GET"])
+# @require_auth  # Comentado temporalmente - descomentar cuando se necesite autenticación
+async def list_trails(user_id: str = None):  # user_id es opcional cuando no se requiere auth
+    """
+    Listar todos los trails (senderos)
+    
+    Query params:
+    - difficulty: filtrar por dificultad (easy, medium, hard)
+    - status_id: filtrar por estado
+    - limit: límite de resultados (default: 100)
+    - offset: offset para paginación (default: 0)
+    """
+    difficulty = request.args.get("difficulty")
+    status_id = request.args.get("status_id", type=int)
+    limit = request.args.get("limit", default=100, type=int)
+    offset = request.args.get("offset", default=0, type=int)
+    
+    async with get_conn() as conn:
+        # Construir la query con filtros
+        conditions = []
+        params = []
+        param_count = 0
+        
+        if difficulty:
+            param_count += 1
+            conditions.append(f"difficulty = ${param_count}")
+            params.append(difficulty)
+        
+        if status_id is not None:
+            param_count += 1
+            conditions.append(f"status_id = ${param_count}")
+            params.append(status_id)
+        
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+        
+        # Agregar limit y offset
+        param_count += 1
+        limit_param = param_count
+        params.append(limit)
+        param_count += 1
+        offset_param = param_count
+        params.append(offset)
+        
+        query = f"""
+            SELECT * FROM trails
+            {where_clause}
+            ORDER BY created_at DESC
+            LIMIT ${limit_param} OFFSET ${offset_param}
+        """
+        
+        trails = await conn.fetch(query, *params)
+        
+        # Convertir a modelos
+        trail_models = [Trail.from_row(trail) for trail in trails]
+        
+        # Obtener el total para paginación (sin limit y offset)
+        count_params = params[:len(params) - 2] if len(params) > 2 else []
+        count_query = f"SELECT COUNT(*) FROM trails {where_clause}"
+        total = await conn.fetchval(count_query, *count_params) if count_params else await conn.fetchval(count_query)
+        
+        return jsonify({
+            "trails": [trail.to_dict() for trail in trail_models],
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }), 200
+
+
 @trails_bp.route("/trails", methods=["POST"])
 @require_admin
 async def create_trail(user_id: str):
@@ -172,10 +242,17 @@ async def create_trail(user_id: str):
             return jsonify({"error": f"El slug '{slug}' ya está en uso"}), 400
         
         # Construir la query SQL
-        fields = ["slug", "difficulty", "route_type", "created_by"]
-        values = [slug, data["difficulty"], data["route_type"], uuid.UUID(user_id)]
-        placeholders = ["$1", "$2", "$3", "$4"]
-        param_count = 4
+        fields = ["slug", "difficulty", "route_type"]
+        values = [slug, data["difficulty"], data["route_type"]]
+        placeholders = ["$1", "$2", "$3"]
+        param_count = 3
+        
+        # Agregar created_by solo si user_id está disponible
+        # if user_id:
+        #     param_count += 1
+        #     fields.append("created_by")
+        #     values.append(uuid.UUID(user_id))
+        #     placeholders.append(f"${param_count}")
         
         # Agregar campos opcionales
         optional_fields = {
@@ -198,13 +275,18 @@ async def create_trail(user_id: str):
                 values.append(data[key])
                 placeholders.append(f"${param_count}")
         
-        # Agregar map_point si existe
+        # Agregar map_point si existe (guardar como JSON en lugar de geography)
         if map_point_coords:
             param_count += 1
             fields.append("map_point")
-            placeholders.append(f"ST_SetSRID(ST_MakePoint(${param_count}, ${param_count + 1}), 4326)")
-            values.extend(map_point_coords)
-            param_count += 1
+            # Guardar como JSON: {"latitude": lat, "longitude": lon}
+            import json
+            map_point_json = json.dumps({
+                "latitude": map_point_coords[1],
+                "longitude": map_point_coords[0]
+            })
+            placeholders.append(f"${param_count}::jsonb")
+            values.append(map_point_json)
         
         # Construir y ejecutar la query
         fields_str = ", ".join(fields)
@@ -228,6 +310,307 @@ async def create_trail(user_id: str):
             "message": "Trail creado exitosamente",
             "trail": trail_model.to_dict()
         }), 201
+
+
+@trails_bp.route("/trails/<trail_id>", methods=["GET"])
+# @require_auth  # Comentado temporalmente - descomentar cuando se necesite autenticación
+async def get_trail(trail_id: str, user_id: str = None):
+    """
+    Obtener un trail específico por ID
+    """
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+    except ValueError:
+        return jsonify({"error": "ID de trail inválido"}), 400
+    
+    async with get_conn() as conn:
+        # Obtener trail con map_point como JSON
+        trail = await conn.fetchrow("""
+            SELECT 
+                id, slug, difficulty, route_type, region,
+                distance_km, elevation_gain, elevation_loss, max_altitude, min_altitude,
+                duration_minutes, is_featured, is_premium, status_id, created_by,
+                created_at, updated_at,
+                map_point::text as map_point
+            FROM trails 
+            WHERE id = $1
+        """, trail_uuid)
+        if not trail:
+            return jsonify({"error": "Trail no encontrado"}), 404
+        
+        trail_model = Trail.from_row(trail)
+        trail_dict = trail_model.to_dict()
+        
+        # Convertir map_point de JSON si existe
+        if trail_dict.get('map_point'):
+            import json
+            map_point_data = trail_dict['map_point']
+            print(f"DEBUG: map_point_data type: {type(map_point_data)}, value: {map_point_data}")
+            if isinstance(map_point_data, str):
+                try:
+                    map_point_data = json.loads(map_point_data)
+                    print(f"DEBUG: Parsed map_point_data: {map_point_data}")
+                except Exception as e:
+                    print(f"DEBUG: Error parsing map_point: {e}")
+                    map_point_data = None
+            if isinstance(map_point_data, dict):
+                trail_dict['map_point'] = map_point_data
+                print(f"DEBUG: Final map_point in response: {trail_dict['map_point']}")
+            else:
+                print(f"DEBUG: map_point_data is not a dict, setting to None")
+                trail_dict['map_point'] = None
+        else:
+            trail_dict['map_point'] = None
+        
+        # Obtener rutas activas y sus segmentos
+        routes_query = """
+            SELECT id, trail_id, version, is_active, total_distance_km, 
+                   elevation_gain, elevation_loss, created_at
+            FROM trail_routes 
+            WHERE trail_id = $1 AND is_active = true
+            ORDER BY version DESC
+            LIMIT 1
+        """
+        route = await conn.fetchrow(routes_query, trail_uuid)
+        trail_dict['route'] = None
+        trail_dict['route_segments'] = []
+        
+        if route:
+            route_id = route['id']
+            route_dict = {
+                'id': str(route['id']),
+                'trail_id': str(route['trail_id']),
+                'version': route['version'],
+                'is_active': route['is_active'],
+                'total_distance_km': float(route['total_distance_km']) if route.get('total_distance_km') else None,
+                'elevation_gain': route.get('elevation_gain'),
+                'elevation_loss': route.get('elevation_loss'),
+            }
+            trail_dict['route'] = route_dict
+            
+            # Obtener segmentos de la ruta (path ahora es JSON)
+            segments_query = """
+                SELECT 
+                    id, route_id, segment_order, distance_km,
+                    path
+                FROM route_segments 
+                WHERE route_id = $1
+                ORDER BY segment_order ASC
+            """
+            segments = await conn.fetch(segments_query, route_id)
+            
+            for segment in segments:
+                segment_dict = dict(segment)
+                path_coords = []
+                
+                # path ahora es JSON: [[lat, lng], [lat, lng], ...]
+                if segment_dict.get('path'):
+                    path_data = segment_dict['path']
+                    import json
+                    # Si es string, parsearlo
+                    if isinstance(path_data, str):
+                        try:
+                            path_data = json.loads(path_data)
+                        except:
+                            path_data = None
+                    # Si es array, usarlo directamente
+                    if isinstance(path_data, list):
+                        path_coords = path_data
+                
+                segment_dict['path'] = path_coords
+                segment_dict['id'] = str(segment_dict['id'])
+                segment_dict['route_id'] = str(segment_dict['route_id'])
+                if isinstance(segment_dict.get('distance_km'), Decimal):
+                    segment_dict['distance_km'] = float(segment_dict['distance_km'])
+                trail_dict['route_segments'].append(segment_dict)
+        
+        # Obtener puntos de interés (location ahora es JSON)
+        points_query = """
+            SELECT 
+                id, trail_id, name, description, type, 
+                km_marker, order_index,
+                location
+            FROM trail_points 
+            WHERE trail_id = $1
+            ORDER BY order_index ASC
+        """
+        points = await conn.fetch(points_query, trail_uuid)
+        trail_dict['points'] = []
+        for point in points:
+            point_dict = dict(point)
+            # location ahora es JSON: {"latitude": lat, "longitude": lon, "elevation": elev}
+            location_obj = None
+            if point_dict.get('location'):
+                location_data = point_dict['location']
+                import json
+                # Si es string, parsearlo
+                if isinstance(location_data, str):
+                    try:
+                        location_data = json.loads(location_data)
+                    except:
+                        location_data = None
+                # Si es dict, usarlo directamente
+                if isinstance(location_data, dict):
+                    location_obj = location_data
+            point_dict['location'] = location_obj
+            # Convertir UUIDs y Decimal
+            if point_dict.get('id'):
+                point_dict['id'] = str(point_dict['id'])
+            if point_dict.get('trail_id'):
+                point_dict['trail_id'] = str(point_dict['trail_id'])
+            if isinstance(point_dict.get('km_marker'), Decimal):
+                point_dict['km_marker'] = float(point_dict['km_marker'])
+            # Incluir todos los puntos, incluso si no tienen location
+            trail_dict['points'].append(point_dict)
+        
+        return jsonify({
+            "trail": trail_dict
+        }), 200
+
+
+@trails_bp.route("/trails/<trail_id>", methods=["PUT", "PATCH"])
+@require_admin
+async def update_trail(trail_id: str, user_id: str):
+    """
+    Actualizar un trail existente
+    
+    Body: Mismos campos que en POST, pero todos opcionales excepto los requeridos
+    """
+    data = await request.get_json()
+    
+    if not data:
+        return jsonify({"error": "Datos requeridos"}), 400
+    
+    # Validar ID
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+    except ValueError:
+        return jsonify({"error": "ID de trail inválido"}), 400
+    
+    async with get_conn() as conn:
+        # Verificar que el trail existe
+        existing_trail = await conn.fetchrow("SELECT * FROM trails WHERE id = $1", trail_uuid)
+        if not existing_trail:
+            return jsonify({"error": "Trail no encontrado"}), 404
+        
+        # Validar difficulty si se proporciona
+        if "difficulty" in data:
+            if data["difficulty"] not in ["easy", "medium", "hard"]:
+                return jsonify({"error": "difficulty debe ser 'easy', 'medium' o 'hard'"}), 400
+        
+        # Validar route_type si se proporciona
+        if "route_type" in data:
+            if data["route_type"] not in ["circular", "lineal", "ida_vuelta"]:
+                return jsonify({"error": "route_type debe ser 'circular', 'lineal' o 'ida_vuelta'"}), 400
+        
+        # Validar map_point si se proporciona (ahora se guarda como JSON)
+        map_point_coords = None
+        if data.get("map_point"):
+            map_point = data["map_point"]
+            if not isinstance(map_point, dict) or "longitude" not in map_point or "latitude" not in map_point:
+                return jsonify({"error": "map_point debe tener 'longitude' y 'latitude'"}), 400
+            
+            longitude = map_point["longitude"]
+            latitude = map_point["latitude"]
+            
+            if not isinstance(longitude, (int, float)) or not isinstance(latitude, (int, float)):
+                return jsonify({"error": "longitude y latitude deben ser números"}), 400
+            
+            map_point_coords = (longitude, latitude)
+        
+        # Construir la query UPDATE
+        updates = []
+        values = []
+        param_count = 0
+        
+        # Campos que se pueden actualizar
+        updatable_fields = {
+            "difficulty": "difficulty",
+            "route_type": "route_type",
+            "region": "region",
+            "distance_km": "distance_km",
+            "elevation_gain": "elevation_gain",
+            "elevation_loss": "elevation_loss",
+            "max_altitude": "max_altitude",
+            "min_altitude": "min_altitude",
+            "duration_minutes": "duration_minutes",
+            "is_featured": "is_featured",
+            "is_premium": "is_premium",
+            "status_id": "status_id",
+            "slug": "slug"
+        }
+        
+        for key, db_field in updatable_fields.items():
+            if key in data and data[key] is not None:
+                param_count += 1
+                updates.append(f"{db_field} = ${param_count}")
+                values.append(data[key])
+        
+        # Agregar map_point si existe (guardar como JSON)
+        if map_point_coords:
+            param_count += 1
+            import json
+            map_point_json = json.dumps({
+                "latitude": map_point_coords[1],
+                "longitude": map_point_coords[0]
+            })
+            updates.append(f"map_point = ${param_count}::jsonb")
+            values.append(map_point_json)
+        
+        # Agregar updated_at (no necesita parámetro)
+        updates.append("updated_at = NOW()")
+        
+        if not updates:
+            return jsonify({"error": "No hay campos para actualizar"}), 400
+        
+        # Agregar el ID al final para el WHERE
+        param_count += 1
+        where_param = param_count
+        values.append(trail_uuid)
+        
+        query = f"""
+            UPDATE trails
+            SET {', '.join(updates)}
+            WHERE id = ${where_param}
+            RETURNING *
+        """
+        
+        trail = await conn.fetchrow(query, *values)
+        
+        if not trail:
+            return jsonify({"error": "Error al actualizar el trail"}), 500
+        
+        trail_model = Trail.from_row(trail)
+        
+        return jsonify({
+            "message": "Trail actualizado exitosamente",
+            "trail": trail_model.to_dict()
+        }), 200
+
+
+@trails_bp.route("/trails/<trail_id>", methods=["DELETE"])
+@require_admin
+async def delete_trail(trail_id: str, user_id: str):
+    """
+    Eliminar un trail
+    """
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+    except ValueError:
+        return jsonify({"error": "ID de trail inválido"}), 400
+    
+    async with get_conn() as conn:
+        # Verificar que el trail existe
+        trail = await conn.fetchrow("SELECT id FROM trails WHERE id = $1", trail_uuid)
+        if not trail:
+            return jsonify({"error": "Trail no encontrado"}), 404
+        
+        # Eliminar el trail (las foreign keys deberían manejar las relaciones)
+        await conn.execute("DELETE FROM trails WHERE id = $1", trail_uuid)
+        
+        return jsonify({
+            "message": "Trail eliminado exitosamente"
+        }), 200
 
 
 @trails_bp.route("/trails/<trail_id>/routes", methods=["POST"])
@@ -348,22 +731,15 @@ async def create_route_segment(trail_id: str, route_id: str, user_id: str):
     if not isinstance(path, list) or len(path) < 2:
         return jsonify({"error": "path debe ser un array con al menos 2 puntos"}), 400
     
-    # Validar cada punto
+    # Validar cada punto (ahora viene como [lon, lat] o [lon, lat, elevation])
     for i, point in enumerate(path):
         if not isinstance(point, list) or len(point) < 2:
             return jsonify({"error": f"El punto {i} debe ser un array [longitude, latitude] o [longitude, latitude, elevation]"}), 400
         
-        if len(point) == 2:
-            lon, lat = point
-            elevation = 0  # Default elevation
-        else:
-            lon, lat, elevation = point[0], point[1], point[2]
+        lon, lat = point[0], point[1]
         
         if not isinstance(lon, (int, float)) or not isinstance(lat, (int, float)):
             return jsonify({"error": f"El punto {i} tiene coordenadas inválidas"}), 400
-        
-        if not isinstance(elevation, (int, float)):
-            elevation = 0
     
     # Validar IDs
     try:
@@ -386,23 +762,23 @@ async def create_route_segment(trail_id: str, route_id: str, user_id: str):
         if not route:
             return jsonify({"error": "Ruta no encontrada o no pertenece al trail"}), 404
         
-        # Construir el LineStringZ para PostGIS usando WKT
-        # Formato WKT: LINESTRINGZ(lon lat elevation, lon lat elevation, ...)
-        points_wkt = []
+        # Convertir path a JSON (guardar como JSON en lugar de geography)
+        # path viene como [[lon, lat, elevation], ...] del frontend
+        # Lo guardamos como [[lat, lon], ...] para Leaflet
+        import json
+        path_json = []
         for point in path:
-            if len(point) == 2:
-                lon, lat = point
-                elevation = 0
-            else:
-                lon, lat, elevation = point[0], point[1], point[2]
-            points_wkt.append(f"{lon} {lat} {elevation}")
+            if len(point) >= 2:
+                lon, lat = point[0], point[1]
+                # Guardar como [lat, lon] para Leaflet
+                path_json.append([lat, lon])
         
-        wkt_string = f"LINESTRINGZ({', '.join(points_wkt)})"
+        path_json_str = json.dumps(path_json)
         
-        # Construir la query usando ST_GeomFromText con parámetro
+        # Construir la query usando JSONB
         fields = ["route_id", "path", "segment_order"]
-        placeholders = ["$1", "ST_SetSRID(ST_GeomFromText($2, 4326), 4326)::geography", "$3"]
-        values = [route_uuid, wkt_string, data["segment_order"]]
+        placeholders = ["$1", "$2::jsonb", "$3"]
+        values = [route_uuid, path_json_str, data["segment_order"]]
         param_count = 3
         
         if "distance_km" in data and data["distance_km"] is not None:
@@ -513,13 +889,18 @@ async def create_trail_point(trail_id: str, user_id: str):
                 values.append(data[key])
                 placeholders.append(f"${param_count}")
         
-        # Agregar location si existe
+        # Agregar location si existe (guardar como JSON)
         if location_coords:
             param_count += 1
             fields.append("location")
-            placeholders.append(f"ST_SetSRID(ST_MakePoint(${param_count}, ${param_count + 1}, ${param_count + 2}), 4326)::geography")
-            values.extend(location_coords)
-            param_count += 2
+            import json
+            location_json = json.dumps({
+                "longitude": location_coords[0],
+                "latitude": location_coords[1],
+                "elevation": location_coords[2] if len(location_coords) > 2 else 0
+            })
+            placeholders.append(f"${param_count}::jsonb")
+            values.append(location_json)
         
         fields_str = ", ".join(fields)
         placeholders_str = ", ".join(placeholders)
