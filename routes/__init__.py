@@ -6,7 +6,7 @@ from routes.health import health_bp
 from routes.api import api_bp
 from routes.auth import auth_bp
 from routes.trails import trails_bp
-
+from routes.users import users_bp
 
 def register_routes(app):
     """Registra todos los blueprints de rutas"""
@@ -21,3 +21,6 @@ def register_routes(app):
     
     # Blueprint para trails
     app.register_blueprint(trails_bp, url_prefix='/api/v1')
+
+    # Blueprint para users
+    app.register_blueprint(users_bp, url_prefix='/api/v1')
