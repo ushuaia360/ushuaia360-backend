@@ -14,6 +14,7 @@ class Trail(BaseModel):
         super().__init__(**kwargs)
         self.id = kwargs.get('id')
         self.slug = kwargs.get('slug')
+        self.description = kwargs.get('description')
         self.difficulty = kwargs.get('difficulty')  # 'easy', 'medium', 'hard'
         self.route_type = kwargs.get('route_type')  # 'circular', 'lineal', 'ida_vuelta'
         self.region = kwargs.get('region')
@@ -135,7 +136,7 @@ class TrailPoint(BaseModel):
         self.trail_id = kwargs.get('trail_id')
         self.name = kwargs.get('name')
         self.description = kwargs.get('description')
-        self.type = kwargs.get('type')  # 'mirador', 'peligro', 'agua', 'descanso'
+        self.type = kwargs.get('type')  # 'inicio', 'fin', 'mirador', 'peligro', 'agua', 'descanso', 'refugio', 'cruce', 'campamento', 'cascada', 'vista', 'informacion'
         self.location = kwargs.get('location')  # GEOGRAPHY(PointZ, 4326)
         self.km_marker = kwargs.get('km_marker')
         self.order_index = kwargs.get('order_index')

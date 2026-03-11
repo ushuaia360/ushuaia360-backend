@@ -165,6 +165,7 @@ async def create_trail(user_id: str):
     {
         "difficulty": "easy" | "medium" | "hard",
         "route_type": "circular" | "lineal" | "ida_vuelta",
+        "description": string (opcional),
         "region": string,
         "distance_km": decimal,
         "elevation_gain": int,
@@ -256,6 +257,7 @@ async def create_trail(user_id: str):
         
         # Agregar campos opcionales
         optional_fields = {
+            "description": "description",
             "region": "region",
             "distance_km": "distance_km",
             "elevation_gain": "elevation_gain",
@@ -527,6 +529,7 @@ async def update_trail(trail_id: str, user_id: str):
         updatable_fields = {
             "difficulty": "difficulty",
             "route_type": "route_type",
+            "description": "description",
             "region": "region",
             "distance_km": "distance_km",
             "elevation_gain": "elevation_gain",
@@ -819,7 +822,7 @@ async def create_trail_point(trail_id: str, user_id: str):
     {
         "name": string (opcional),
         "description": string (opcional),
-        "type": "mirador" | "peligro" | "agua" | "descanso" (opcional),
+        "type": "inicio" | "fin" | "mirador" | "peligro" | "agua" | "descanso" | "refugio" | "cruce" | "campamento" | "cascada" | "vista" | "informacion" (opcional),
         "location": {
             "longitude": float,
             "latitude": float,
@@ -833,7 +836,7 @@ async def create_trail_point(trail_id: str, user_id: str):
     
     # Validar tipo si se proporciona
     if data.get("type"):
-        valid_types = ["mirador", "peligro", "agua", "descanso"]
+        valid_types = ["inicio", "fin", "mirador", "peligro", "agua", "descanso", "refugio", "cruce", "campamento", "cascada", "vista", "informacion"]
         if data["type"] not in valid_types:
             return jsonify({"error": f"type debe ser uno de: {', '.join(valid_types)}"}), 400
     

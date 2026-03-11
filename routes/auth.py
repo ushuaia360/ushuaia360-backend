@@ -339,7 +339,7 @@ async def get_users():
 
         # Get all users
         users = await conn.fetch(
-            "SELECT id, email, full_name, avatar_url, language, is_admin, is_premium, email_verified, created_at FROM users ORDER BY created_at DESC"
+            "SELECT id, email, full_name, avatar_url, language, is_admin, is_premium, email_verified, is_suspended, created_at FROM users ORDER BY created_at DESC"
         )
 
     # Convert UUIDs to strings for JSON serialization
