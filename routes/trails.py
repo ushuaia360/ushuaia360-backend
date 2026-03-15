@@ -94,13 +94,21 @@ async def list_trails(user_id: str = None):  # user_id es opcional cuando no se 
     Query params:
     - difficulty: filtrar por dificultad (easy, medium, hard)
     - status_id: filtrar por estado
-    - limit: límite de resultados (default: 100)
+    - is_featured: filtrar por destacados (true/false)
+    - limit: límite de resultados (default: 20)
     - offset: offset para paginación (default: 0)
     """
+    import json as _json
+
     difficulty = request.args.get("difficulty")
     status_id = request.args.get("status_id", type=int)
-    limit = request.args.get("limit", default=100, type=int)
+    is_featured_str = request.args.get("is_featured")
+    limit = request.args.get("limit", default=20, type=int)
     offset = request.args.get("offset", default=0, type=int)
+
+    is_featured = None
+    if is_featured_str is not None:
+        is_featured = is_featured_str.lower() in ("true", "1", "yes")
     
     async with get_conn() as conn:
         # Construir la query con filtros
@@ -110,13 +118,18 @@ async def list_trails(user_id: str = None):  # user_id es opcional cuando no se 
         
         if difficulty:
             param_count += 1
-            conditions.append(f"difficulty = ${param_count}")
+            conditions.append(f"t.difficulty = ${param_count}")
             params.append(difficulty)
         
         if status_id is not None:
             param_count += 1
-            conditions.append(f"status_id = ${param_count}")
+            conditions.append(f"t.status_id = ${param_count}")
             params.append(status_id)
+
+        if is_featured is not None:
+            param_count += 1
+            conditions.append(f"t.is_featured = ${param_count}")
+            params.append(is_featured)
         
         where_clause = ""
         if conditions:
@@ -131,24 +144,64 @@ async def list_trails(user_id: str = None):  # user_id es opcional cuando no se 
         params.append(offset)
         
         query = f"""
-            SELECT * FROM trails
+            SELECT
+                t.id, t.slug, t.name, t.difficulty, t.route_type, t.region,
+                t.distance_km, t.elevation_gain, t.elevation_loss,
+                t.max_altitude, t.min_altitude, t.duration_minutes,
+                t.is_featured, t.is_premium, t.status_id, t.created_by,
+                t.created_at, t.updated_at, t.description,
+                t.map_point::text AS map_point,
+                (SELECT url FROM trail_media
+                    WHERE trail_id = t.id AND media_type = 'image'
+                    ORDER BY order_index ASC LIMIT 1) AS thumbnail_url,
+                ARRAY(SELECT url FROM trail_media
+                    WHERE trail_id = t.id AND media_type = 'image'
+                    ORDER BY order_index ASC) AS image_urls
+            FROM trails t
             {where_clause}
-            ORDER BY created_at DESC
+            ORDER BY t.created_at DESC
             LIMIT ${limit_param} OFFSET ${offset_param}
         """
         
         trails = await conn.fetch(query, *params)
         
-        # Convertir a modelos
-        trail_models = [Trail.from_row(trail) for trail in trails]
-        
         # Obtener el total para paginación (sin limit y offset)
-        count_params = params[:len(params) - 2] if len(params) > 2 else []
-        count_query = f"SELECT COUNT(*) FROM trails {where_clause}"
-        total = await conn.fetchval(count_query, *count_params) if count_params else await conn.fetchval(count_query)
+        count_filter_params = params[:param_count - 2]
+        count_query = f"SELECT COUNT(*) FROM trails t {where_clause}"
+        total = await conn.fetchval(count_query, *count_filter_params) if count_filter_params else await conn.fetchval(count_query)
+        
+        # Serializar manualmente para incluir map_point y arrays
+        trails_list = []
+        for row in trails:
+            trail_dict = dict(row)
+            # Convertir UUIDs y Decimals
+            if trail_dict.get('id'):
+                trail_dict['id'] = str(trail_dict['id'])
+            if trail_dict.get('created_by'):
+                trail_dict['created_by'] = str(trail_dict['created_by'])
+            if isinstance(trail_dict.get('distance_km'), Decimal):
+                trail_dict['distance_km'] = float(trail_dict['distance_km'])
+            # Parsear map_point JSON
+            if trail_dict.get('map_point'):
+                try:
+                    trail_dict['map_point'] = _json.loads(trail_dict['map_point'])
+                except Exception:
+                    trail_dict['map_point'] = None
+            else:
+                trail_dict['map_point'] = None
+            # Convertir datetimes
+            for dt_field in ('created_at', 'updated_at'):
+                if trail_dict.get(dt_field):
+                    trail_dict[dt_field] = trail_dict[dt_field].isoformat()
+            # image_urls puede ser una lista de asyncpg
+            if trail_dict.get('image_urls') is None:
+                trail_dict['image_urls'] = []
+            else:
+                trail_dict['image_urls'] = list(trail_dict['image_urls'])
+            trails_list.append(trail_dict)
         
         return jsonify({
-            "trails": [trail.to_dict() for trail in trail_models],
+            "trails": trails_list,
             "total": total,
             "limit": limit,
             "offset": offset
@@ -257,6 +310,7 @@ async def create_trail(user_id: str):
         
         # Agregar campos opcionales
         optional_fields = {
+            "name": "name",
             "description": "description",
             "region": "region",
             "distance_km": "distance_km",
@@ -329,10 +383,10 @@ async def get_trail(trail_id: str, user_id: str = None):
         # Obtener trail con map_point como JSON
         trail = await conn.fetchrow("""
             SELECT 
-                id, slug, difficulty, route_type, region,
+                id, slug, name, difficulty, route_type, region,
                 distance_km, elevation_gain, elevation_loss, max_altitude, min_altitude,
                 duration_minutes, is_featured, is_premium, status_id, created_by,
-                created_at, updated_at,
+                created_at, updated_at, description,
                 map_point::text as map_point
             FROM trails 
             WHERE id = $1
@@ -527,6 +581,7 @@ async def update_trail(trail_id: str, user_id: str):
         
         # Campos que se pueden actualizar
         updatable_fields = {
+            "name": "name",
             "difficulty": "difficulty",
             "route_type": "route_type",
             "description": "description",

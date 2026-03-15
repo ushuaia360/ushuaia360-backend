@@ -14,6 +14,7 @@ class Trail(BaseModel):
         super().__init__(**kwargs)
         self.id = kwargs.get('id')
         self.slug = kwargs.get('slug')
+        self.name = kwargs.get('name')
         self.description = kwargs.get('description')
         self.difficulty = kwargs.get('difficulty')  # 'easy', 'medium', 'hard'
         self.route_type = kwargs.get('route_type')  # 'circular', 'lineal', 'ida_vuelta'
