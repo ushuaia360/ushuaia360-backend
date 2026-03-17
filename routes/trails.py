@@ -152,11 +152,14 @@ async def list_trails(user_id: str = None):  # user_id es opcional cuando no se 
                 t.created_at, t.updated_at, t.description,
                 t.map_point::text AS map_point,
                 (SELECT url FROM trail_media
-                    WHERE trail_id = t.id AND media_type = 'image'
-                    ORDER BY order_index ASC LIMIT 1) AS thumbnail_url,
+                    WHERE trail_id = t.id
+                    AND media_type IN ('image', 'photo_360', 'photo_180')
+                    ORDER BY order_index ASC, created_at ASC
+                    LIMIT 1) AS thumbnail_url,
                 ARRAY(SELECT url FROM trail_media
-                    WHERE trail_id = t.id AND media_type = 'image'
-                    ORDER BY order_index ASC) AS image_urls
+                    WHERE trail_id = t.id
+                    AND media_type IN ('image', 'photo_360', 'photo_180')
+                    ORDER BY order_index ASC, created_at ASC) AS image_urls
             FROM trails t
             {where_clause}
             ORDER BY t.created_at DESC
@@ -480,6 +483,21 @@ async def get_trail(trail_id: str, user_id: str = None):
                     segment_dict['distance_km'] = float(segment_dict['distance_km'])
                 trail_dict['route_segments'].append(segment_dict)
         
+        # Obtener media del sendero
+        trail_media_rows = await conn.fetch("""
+            SELECT id, trail_id, trail_point_id, media_type, url, thumbnail_url, order_index, created_at
+            FROM trail_media
+            WHERE trail_id = $1 AND trail_point_id IS NULL
+            ORDER BY order_index ASC NULLS LAST, created_at ASC
+        """, trail_uuid)
+        trail_dict['media'] = []
+        for row in trail_media_rows:
+            m = dict(row)
+            if m.get('id'): m['id'] = str(m['id'])
+            if m.get('trail_id'): m['trail_id'] = str(m['trail_id'])
+            if m.get('created_at'): m['created_at'] = m['created_at'].isoformat()
+            trail_dict['media'].append(m)
+
         # Obtener puntos de interés (location ahora es JSON)
         points_query = """
             SELECT 
@@ -499,13 +517,11 @@ async def get_trail(trail_id: str, user_id: str = None):
             if point_dict.get('location'):
                 location_data = point_dict['location']
                 import json
-                # Si es string, parsearlo
                 if isinstance(location_data, str):
                     try:
                         location_data = json.loads(location_data)
                     except:
                         location_data = None
-                # Si es dict, usarlo directamente
                 if isinstance(location_data, dict):
                     location_obj = location_data
             point_dict['location'] = location_obj
@@ -516,7 +532,23 @@ async def get_trail(trail_id: str, user_id: str = None):
                 point_dict['trail_id'] = str(point_dict['trail_id'])
             if isinstance(point_dict.get('km_marker'), Decimal):
                 point_dict['km_marker'] = float(point_dict['km_marker'])
-            # Incluir todos los puntos, incluso si no tienen location
+
+            # Obtener media del punto
+            point_uuid_val = uuid.UUID(point_dict['id'])
+            point_media_rows = await conn.fetch("""
+                SELECT id, trail_point_id, media_type, url, thumbnail_url, order_index, created_at
+                FROM trail_media
+                WHERE trail_point_id = $1
+                ORDER BY order_index ASC NULLS LAST, created_at ASC
+            """, point_uuid_val)
+            point_dict['media'] = []
+            for pm in point_media_rows:
+                pm_dict = dict(pm)
+                if pm_dict.get('id'): pm_dict['id'] = str(pm_dict['id'])
+                if pm_dict.get('trail_point_id'): pm_dict['trail_point_id'] = str(pm_dict['trail_point_id'])
+                if pm_dict.get('created_at'): pm_dict['created_at'] = pm_dict['created_at'].isoformat()
+                point_dict['media'].append(pm_dict)
+
             trail_dict['points'].append(point_dict)
         
         return jsonify({
@@ -1064,6 +1096,130 @@ async def create_trail_media(trail_id: str, user_id: str):
         }), 201
 
 
+@trails_bp.route("/trails/<trail_id>/media/<media_id>", methods=["DELETE"])
+@require_admin
+async def delete_trail_media(trail_id: str, media_id: str, user_id: str):
+    """Eliminar media del sendero (trail_point_id IS NULL)"""
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+        media_uuid = uuid.UUID(media_id)
+    except ValueError:
+        return jsonify({"error": "ID inválido"}), 400
+
+    async with get_conn() as conn:
+        result = await conn.execute("""
+            DELETE FROM trail_media
+            WHERE id = $1 AND trail_id = $2 AND trail_point_id IS NULL
+        """, media_uuid, trail_uuid)
+        if result == "DELETE 0":
+            return jsonify({"error": "Media no encontrado o no pertenece al sendero"}), 404
+    return jsonify({"message": "Media eliminado"}), 200
+
+
+@trails_bp.route("/trails/<trail_id>/media", methods=["GET"])
+async def get_trail_media(trail_id: str):
+    """
+    Listar todos los archivos media de un trail.
+    
+    Query params:
+    - media_type: filtrar por tipo (image, photo_360, photo_180, video)
+    """
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+    except ValueError:
+        return jsonify({"error": "ID de trail inválido"}), 400
+
+    media_type_filter = request.args.get("media_type")
+
+    async with get_conn() as conn:
+        trail = await conn.fetchrow("SELECT id FROM trails WHERE id = $1", trail_uuid)
+        if not trail:
+            return jsonify({"error": "Trail no encontrado"}), 404
+
+        conditions = ["trail_id = $1", "trail_point_id IS NULL"]
+        params = [trail_uuid]
+        if media_type_filter:
+            params.append(media_type_filter)
+            conditions.append(f"media_type = ${len(params)}")
+
+        where = " AND ".join(conditions)
+        rows = await conn.fetch(
+            f"""
+            SELECT id, trail_id, trail_point_id, media_type, url, thumbnail_url, order_index, created_at
+            FROM trail_media
+            WHERE {where}
+            ORDER BY order_index ASC NULLS LAST, created_at ASC
+            """,
+            *params,
+        )
+
+        media_list = []
+        for row in rows:
+            m = dict(row)
+            if m.get("id"): m["id"] = str(m["id"])
+            if m.get("trail_id"): m["trail_id"] = str(m["trail_id"])
+            if m.get("created_at"): m["created_at"] = m["created_at"].isoformat()
+            media_list.append(m)
+
+        return jsonify({"media": media_list}), 200
+
+
+@trails_bp.route("/trails/<trail_id>/points/<point_id>/media", methods=["GET"])
+async def get_trail_point_media(trail_id: str, point_id: str):
+    """
+    Listar todos los archivos media de un punto de interés.
+    
+    Query params:
+    - media_type: filtrar por tipo (image, photo_360, photo_180, video)
+    """
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+        point_uuid = uuid.UUID(point_id)
+    except ValueError:
+        return jsonify({"error": "ID de trail o punto inválido"}), 400
+
+    media_type_filter = request.args.get("media_type")
+
+    async with get_conn() as conn:
+        trail = await conn.fetchrow("SELECT id FROM trails WHERE id = $1", trail_uuid)
+        if not trail:
+            return jsonify({"error": "Trail no encontrado"}), 404
+
+        point = await conn.fetchrow(
+            "SELECT id FROM trail_points WHERE id = $1 AND trail_id = $2",
+            point_uuid, trail_uuid,
+        )
+        if not point:
+            return jsonify({"error": "Punto de interés no encontrado o no pertenece al trail"}), 404
+
+        conditions = ["trail_point_id = $1"]
+        params = [point_uuid]
+        if media_type_filter:
+            params.append(media_type_filter)
+            conditions.append(f"media_type = ${len(params)}")
+
+        where = " AND ".join(conditions)
+        rows = await conn.fetch(
+            f"""
+            SELECT id, trail_point_id, media_type, url, thumbnail_url, order_index, created_at
+            FROM trail_media
+            WHERE {where}
+            ORDER BY order_index ASC NULLS LAST, created_at ASC
+            """,
+            *params,
+        )
+
+        media_list = []
+        for row in rows:
+            m = dict(row)
+            if m.get("id"): m["id"] = str(m["id"])
+            if m.get("trail_point_id"): m["trail_point_id"] = str(m["trail_point_id"])
+            if m.get("created_at"): m["created_at"] = m["created_at"].isoformat()
+            media_list.append(m)
+
+        return jsonify({"media": media_list}), 200
+
+
 @trails_bp.route("/trails/<trail_id>/points/<point_id>/media", methods=["POST"])
 @require_admin
 async def create_trail_point_media(trail_id: str, point_id: str, user_id: str):
@@ -1115,7 +1271,7 @@ async def create_trail_point_media(trail_id: str, point_id: str, user_id: str):
         if not point:
             return jsonify({"error": "Trail point no encontrado o no pertenece al trail"}), 404
         
-        # Construir la query
+        # Construir la query para point media
         fields = ["trail_point_id", "media_type", "url"]
         values = [point_uuid, data["media_type"], data["url"]]
         placeholders = ["$1", "$2", "$3"]
@@ -1153,3 +1309,25 @@ async def create_trail_point_media(trail_id: str, point_id: str, user_id: str):
             "message": "Media creado exitosamente",
             "media": media_model.to_dict()
         }), 201
+
+
+@trails_bp.route("/trails/<trail_id>/points/<point_id>/media/<media_id>", methods=["DELETE"])
+@require_admin
+async def delete_trail_point_media(trail_id: str, point_id: str, media_id: str, user_id: str):
+    """Eliminar media de un punto de interés"""
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+        point_uuid = uuid.UUID(point_id)
+        media_uuid = uuid.UUID(media_id)
+    except ValueError:
+        return jsonify({"error": "ID inválido"}), 400
+
+    async with get_conn() as conn:
+        result = await conn.execute("""
+            DELETE FROM trail_media
+            WHERE id = $1 AND trail_point_id = $2
+            AND EXISTS (SELECT 1 FROM trail_points WHERE id = $2 AND trail_id = $3)
+        """, media_uuid, point_uuid, trail_uuid)
+        if result == "DELETE 0":
+            return jsonify({"error": "Media no encontrado o no pertenece al punto"}), 404
+    return jsonify({"message": "Media eliminado"}), 200
