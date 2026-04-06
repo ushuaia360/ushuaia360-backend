@@ -1,6 +1,7 @@
 """
 Lugares turísticos (lectura pública para la app).
 """
+import json
 import uuid
 
 import asyncpg
@@ -33,7 +34,25 @@ async def get_place(place_id: str):
                         WHERE place_id = p.id
                         AND media_type IN ('image', 'photo_360', 'photo_180')
                         ORDER BY order_index ASC, created_at ASC
-                    ) AS image_urls
+                    ) AS image_urls,
+                    COALESCE(
+                        (
+                            SELECT json_agg(
+                                json_build_object(
+                                    'id', m.id::text,
+                                    'media_type', m.media_type,
+                                    'url', m.url,
+                                    'thumbnail_url', m.thumbnail_url,
+                                    'order_index', m.order_index
+                                )
+                                ORDER BY m.order_index ASC NULLS LAST, m.created_at ASC
+                            )
+                            FROM place_media m
+                            WHERE m.place_id = p.id
+                              AND m.media_type IN ('image', 'photo_360', 'photo_180')
+                        ),
+                        '[]'::json
+                    ) AS media
                 FROM tourist_places p
                 WHERE p.id = $1
                 """,
@@ -55,6 +74,16 @@ async def get_place(place_id: str):
         d["image_urls"] = list(d["image_urls"])
     else:
         d["image_urls"] = []
+    raw_media = d.pop("media", None)
+    if raw_media is None:
+        d["media"] = []
+    elif isinstance(raw_media, str):
+        try:
+            d["media"] = json.loads(raw_media)
+        except json.JSONDecodeError:
+            d["media"] = []
+    else:
+        d["media"] = list(raw_media) if raw_media else []
     for dt_field in ("created_at", "updated_at"):
         if d.get(dt_field):
             d[dt_field] = d[dt_field].isoformat()
