@@ -304,11 +304,15 @@ async def list_trails(user_id: str = None):  # user_id es opcional cuando no se 
                 trail_dict['image_urls'] = list(trail_dict['image_urls'])
             trails_list.append(trail_dict)
         
+        from datetime import datetime, timezone
+
+        server_now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         return jsonify({
             "trails": trails_list,
             "total": total,
             "limit": limit,
-            "offset": offset
+            "offset": offset,
+            "server_now_ms": server_now_ms,
         }), 200
 
 

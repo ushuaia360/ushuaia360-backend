@@ -10,6 +10,7 @@ from routes.users import users_bp
 from routes.favorites import favorites_bp
 from routes.map_markers import map_bp
 from routes.places import places_bp
+from routes.trail_history import trail_history_bp
 
 def register_routes(app):
     """Registra todos los blueprints de rutas"""
@@ -34,3 +35,6 @@ def register_routes(app):
     # Mapa: marcadores y lugares
     app.register_blueprint(map_bp, url_prefix='/api/v1')
     app.register_blueprint(places_bp, url_prefix='/api/v1')
+
+    # Historial de recorridos (/me/trail-history/*)
+    app.register_blueprint(trail_history_bp, url_prefix='/api/v1')
