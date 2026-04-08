@@ -7,6 +7,7 @@ from db import get_conn
 from routes.auth import decode_jwt_token
 from models.trail import Trail, TrailRoute, RouteSegment, TrailPoint
 from models.media import TrailMedia
+from models.review import TrailReview
 from utils.validators import validate_required_fields
 from decimal import Decimal
 import uuid
@@ -1579,3 +1580,187 @@ async def delete_trail_point_media(trail_id: str, point_id: str, media_id: str, 
         if result == "DELETE 0":
             return jsonify({"error": "Media no encontrado o no pertenece al punto"}), 404
     return jsonify({"message": "Media eliminado"}), 200
+
+
+@trails_bp.route("/trails/<trail_id>/reviews", methods=["GET"])
+async def get_trail_reviews(trail_id: str):
+    """
+    Obtener todas las reseñas de un trail específico
+    
+    Query params:
+    - limit: límite de resultados (default: 20)
+    - offset: offset para paginación (default: 0)
+    """
+    limit = request.args.get("limit", default=20, type=int)
+    offset = request.args.get("offset", default=0, type=int)
+    
+    # Validar ID del trail
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+    except ValueError:
+        return jsonify({"error": "ID de trail inválido"}), 400
+    
+    async with get_conn() as conn:
+        # Verificar que el trail existe
+        trail = await conn.fetchrow("SELECT id FROM trails WHERE id = $1", trail_uuid)
+        if not trail:
+            return jsonify({"error": "Trail no encontrado"}), 404
+        
+        # Obtener las reseñas con paginación
+        reviews = await conn.fetch("""
+            SELECT tr.id, tr.trail_id, users.id as user_id, users.full_name as name, users.avatar_url, tr.rating, tr.comment, tr.created_at
+            FROM trail_reviews tr
+            LEFT JOIN users ON tr.user_id = users.id
+            WHERE trail_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2 OFFSET $3
+        """, trail_uuid, limit, offset)
+        
+        # Obtener el total para paginación
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM trail_reviews WHERE trail_id = $1",
+            trail_uuid
+        )
+
+        # Obtener métricas agregadas de rating
+        rating_stats = await conn.fetchrow("""
+            SELECT
+                COALESCE(AVG(rating), 0) AS average_rating,
+                COUNT(*) FILTER (WHERE rating = 1) AS one_star,
+                COUNT(*) FILTER (WHERE rating = 2) AS two_star,
+                COUNT(*) FILTER (WHERE rating = 3) AS three_star,
+                COUNT(*) FILTER (WHERE rating = 4) AS four_star,
+                COUNT(*) FILTER (WHERE rating = 5) AS five_star
+            FROM trail_reviews
+            WHERE trail_id = $1
+        """, trail_uuid)
+        
+        # Serializar manualmente
+        reviews_list = []
+        for row in reviews:
+            review_dict = dict(row)
+            # Convertir UUIDs a strings
+            if review_dict.get('id'):
+                review_dict['id'] = str(review_dict['id'])
+            if review_dict.get('trail_id'):
+                review_dict['trail_id'] = str(review_dict['trail_id'])
+            if review_dict.get('user_id'):
+                review_dict['user_id'] = str(review_dict['user_id'])
+            if review_dict.get('name'):
+                review_dict['name'] = review_dict['name']
+            if review_dict.get('avatar_url'):
+                review_dict['avatar_url'] = review_dict['avatar_url']
+            # Convertir datetime a ISO format
+            if review_dict.get('created_at'):
+                review_dict['created_at'] = review_dict['created_at'].isoformat()
+            reviews_list.append(review_dict)
+
+        # Normalizar métricas para respuesta JSON
+        average_rating = 0.0
+        rating_counts = {
+            "one_star": 0,
+            "two_star": 0,
+            "three_star": 0,
+            "four_star": 0,
+            "five_star": 0
+        }
+
+        if rating_stats:
+            avg = rating_stats.get("average_rating")
+            average_rating = float(avg) if avg is not None else 0.0
+            rating_counts = {
+                "one_star": int(rating_stats.get("one_star") or 0),
+                "two_star": int(rating_stats.get("two_star") or 0),
+                "three_star": int(rating_stats.get("three_star") or 0),
+                "four_star": int(rating_stats.get("four_star") or 0),
+                "five_star": int(rating_stats.get("five_star") or 0)
+            }
+        
+        return jsonify({
+            "reviews": reviews_list,
+            "total": total,
+            "average_rating": average_rating,
+            "rating_counts": rating_counts,
+            "limit": limit,
+            "offset": offset
+        }), 200
+
+
+@trails_bp.route("/trails/<trail_id>/reviews", methods=["POST"])
+@require_auth
+async def create_trail_review(trail_id: str, user_id: str):
+    
+    """
+    Crear una reseña para un trail
+    
+    Body:
+    {
+        "rating": int (1-5, requerido),
+        "comment": string (requerido)
+    }
+    
+    Note: user_id viene del token JWT
+    """
+    data = await request.get_json()
+    
+    if not data:
+        return jsonify({"error": "Datos requeridos"}), 400
+    
+    # Validar campos requeridos
+    required_fields = ["rating", "comment"]
+    error = validate_required_fields(data, required_fields)
+    if error:
+        return jsonify({"error": error}), 400
+    
+    # Validar rating (debe estar entre 1-5)
+    rating = data.get("rating")
+    if not isinstance(rating, int) or rating < 1 or rating > 5:
+        return jsonify({"error": "rating debe ser un número entero entre 1 y 5"}), 400
+    
+    # Validar que comment no esté vacío
+    comment = data.get("comment")
+    if not isinstance(comment, str) or len(comment.strip()) == 0:
+        return jsonify({"error": "comment no puede estar vacío"}), 400
+    
+    # Validar ID del trail
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+    except ValueError:
+        return jsonify({"error": "ID de trail inválido"}), 400
+    
+    # Validar user_id (viene del JWT token)
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        return jsonify({"error": "ID de usuario inválido"}), 400
+    
+    async with get_conn() as conn:
+        # Verificar que el trail existe
+        trail = await conn.fetchrow("SELECT id FROM trails WHERE id = $1", trail_uuid)
+        if not trail:
+            return jsonify({"error": "Trail no encontrado"}), 404
+        
+        # Verificar que el usuario existe
+        user = await conn.fetchrow("SELECT id FROM users WHERE id = $1", user_uuid)
+        if not user:
+            return jsonify({"error": "Usuario no encontrado"}), 404
+        
+        # Insertar la reseña en la tabla trail_reviews
+        query = """
+            INSERT INTO trail_reviews (trail_id, user_id, rating, comment)
+            VALUES ($1, $2, $3, $4)
+            RETURNING *
+        """
+        
+        review = await conn.fetchrow(query, trail_uuid, user_uuid, rating, comment)
+        
+        if not review:
+            return jsonify({"error": "Error al crear la reseña"}), 500
+        
+        # Convertir a modelo
+        review_model = TrailReview.from_row(review)
+        
+        return jsonify({
+            "message": "Reseña creada exitosamente",
+            "review": review_model.to_dict()
+        }), 201
