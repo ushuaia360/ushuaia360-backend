@@ -1764,3 +1764,38 @@ async def create_trail_review(trail_id: str, user_id: str):
             "message": "Reseña creada exitosamente",
             "review": review_model.to_dict()
         }), 201
+
+
+@trails_bp.route("/trails/<trail_id>/reviews/<review_id>", methods=["DELETE"])
+@require_admin
+async def delete_trail_review(trail_id: str, review_id: str, user_id: str):
+    """
+    Eliminar una reseña concreta de un trail (solo administradores).
+
+    La reseña debe pertenecer al trail indicado en la URL.
+    """
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+        review_uuid = uuid.UUID(review_id)
+    except ValueError:
+        return jsonify({"error": "ID de trail o de reseña inválido"}), 400
+
+    async with get_conn() as conn:
+        trail = await conn.fetchrow("SELECT id FROM trails WHERE id = $1", trail_uuid)
+        if not trail:
+            return jsonify({"error": "Trail no encontrado"}), 404
+
+        deleted_id = await conn.fetchval(
+            """
+            DELETE FROM trail_reviews
+            WHERE id = $1 AND trail_id = $2
+            RETURNING id
+            """,
+            review_uuid,
+            trail_uuid,
+        )
+        if not deleted_id:
+            return jsonify({"error": "Reseña no encontrada"}), 404
+
+        return jsonify({"message": "Reseña eliminada exitosamente"}), 200
+
