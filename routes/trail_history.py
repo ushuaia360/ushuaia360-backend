@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from quart import Blueprint, jsonify, request
 
 from db import get_conn
+from routes.favorites import _TRAILS_SELECT, _serialize_trail_row
 from routes.trails import require_auth
 
 trail_history_bp = Blueprint('trail_history', __name__)
@@ -183,6 +184,47 @@ async def trail_history_complete(user_id: str, history_id: str):
 
     payload, _ = _entry_response(dict(row))
     return jsonify(payload), 200
+
+
+@trail_history_bp.route('/me/completed-trails', methods=['GET'])
+@require_auth
+async def list_completed_trails(user_id: str):
+    """Senderos marcados como completados (mismo formato que GET /me/favorite-trails)."""
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        return jsonify({'error': 'ID inválido'}), 400
+
+    async with get_conn() as conn:
+        rows = await conn.fetch(
+            _TRAILS_SELECT
+            + """
+INNER JOIN (
+    SELECT DISTINCT ON (trail_id)
+        trail_id,
+        finished_at AS last_completed_at
+    FROM user_trail_history
+    WHERE user_id = $1 AND completed = TRUE
+    ORDER BY trail_id, finished_at DESC NULLS LAST
+) lp ON lp.trail_id = t.id
+ORDER BY lp.last_completed_at DESC
+""",
+            uid,
+        )
+        total = len(rows)
+
+    trails_list = [_serialize_trail_row(dict(row)) for row in rows]
+    return (
+        jsonify(
+            {
+                'trails': trails_list,
+                'total': total,
+                'limit': total,
+                'offset': 0,
+            }
+        ),
+        200,
+    )
 
 
 @trail_history_bp.route('/me/trail-history', methods=['GET'])
