@@ -97,8 +97,7 @@ async def list_map_markers():
                 """
                 SELECT
                     p.id, p.slug, p.name, p.category, p.region, p.description,
-                    ST_Y(p.location::geometry) AS latitude,
-                    ST_X(p.location::geometry) AS longitude,
+                    p.location::text AS location,
                     (SELECT url FROM place_media
                         WHERE place_id = p.id
                         AND media_type IN ('image', 'photo_360', 'photo_180')
@@ -109,10 +108,10 @@ async def list_map_markers():
                 """
             )
             for row in place_rows:
-                lat = row["latitude"]
-                lng = row["longitude"]
-                if lat is None or lng is None:
+                coords = _parse_map_point(row["location"])
+                if not coords:
                     continue
+                lat, lng = coords
                 pdesc = (row.get("description") or "").strip()
                 if len(pdesc) > 420:
                     pdesc = pdesc[:417].rsplit(" ", 1)[0] + "…"
@@ -125,8 +124,8 @@ async def list_map_markers():
                         "category": row["category"],
                         "region": row["region"],
                         "description": pdesc or None,
-                        "latitude": float(lat),
-                        "longitude": float(lng),
+                        "latitude": lat,
+                        "longitude": lng,
                         "thumbnail_url": row["thumbnail_url"],
                     }
                 )
