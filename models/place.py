@@ -35,7 +35,7 @@ class PlaceMedia(BaseModel):
         super().__init__(**kwargs)
         self.id = kwargs.get('id')
         self.place_id = kwargs.get('place_id')
-        self.media_type = kwargs.get('media_type')  # 'image', 'photo_360', 'photo_180'
+        self.media_type = kwargs.get('media_type')  # 'image', 'photo_360', 'photo_180', 'video'
         self.url = kwargs.get('url')
         self.thumbnail_url = kwargs.get('thumbnail_url')
         self.order_index = kwargs.get('order_index')
