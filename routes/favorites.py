@@ -157,6 +157,77 @@ async def list_favorite_trail_ids(user_id: str):
     return jsonify({"trail_ids": [r["id"] for r in rows]}), 200
 
 
+@favorites_bp.route("/me/favorite-places/ids", methods=["GET"])
+@require_auth
+async def list_favorite_place_ids(user_id: str):
+    """IDs de lugares favoritos (sincronización ligera en la app). Debe ir antes de /<place_id>."""
+    uid = uuid.UUID(user_id)
+    async with get_conn() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT entity_id::text AS id
+            FROM user_favorites
+            WHERE user_id = $1 AND entity_type = 'place'
+            ORDER BY created_at DESC
+            """,
+            uid,
+        )
+    return jsonify({"place_ids": [r["id"] for r in rows]}), 200
+
+
+@favorites_bp.route("/me/favorite-places", methods=["GET"])
+@require_auth
+async def list_favorite_places_unimplemented():
+    """Reservado: listado de lugares (la app solo sincroniza IDs)."""
+    return jsonify({"error": "use /me/favorite-places/ids o admin"}), 501
+
+
+@favorites_bp.route("/me/favorite-places/<place_id>", methods=["POST"])
+@require_auth
+async def add_favorite_place(user_id: str, place_id: str):
+    try:
+        pid = uuid.UUID(place_id)
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        return jsonify({"error": "ID de lugar inválido"}), 400
+
+    async with get_conn() as conn:
+        exists = await conn.fetchrow("SELECT id FROM tourist_places WHERE id = $1", pid)
+        if not exists:
+            return jsonify({"error": "Lugar no encontrado"}), 404
+        await conn.execute(
+            """
+            INSERT INTO user_favorites (user_id, entity_type, entity_id)
+            VALUES ($1, 'place', $2)
+            ON CONFLICT (user_id, entity_type, entity_id) DO NOTHING
+            """,
+            uid,
+            pid,
+        )
+    return jsonify({"favorited": True}), 200
+
+
+@favorites_bp.route("/me/favorite-places/<place_id>", methods=["DELETE"])
+@require_auth
+async def remove_favorite_place(user_id: str, place_id: str):
+    try:
+        pid = uuid.UUID(place_id)
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        return jsonify({"error": "ID de lugar inválido"}), 400
+
+    async with get_conn() as conn:
+        await conn.execute(
+            """
+            DELETE FROM user_favorites
+            WHERE user_id = $1 AND entity_type = 'place' AND entity_id = $2
+            """,
+            uid,
+            pid,
+        )
+    return jsonify({"favorited": False}), 200
+
+
 async def _safe_count(conn, sql: str, uid: uuid.UUID) -> int:
     try:
         n = await conn.fetchval(sql, uid)
@@ -178,7 +249,7 @@ async def profile_stats(user_id: str):
     async with get_conn() as conn:
         favorites_n = await _safe_count(
             conn,
-            "SELECT COUNT(*)::bigint FROM user_favorites WHERE user_id = $1 AND entity_type = 'trail'",
+            "SELECT COUNT(*)::bigint FROM user_favorites WHERE user_id = $1",
             uid,
         )
         reviews_n = await _safe_count(

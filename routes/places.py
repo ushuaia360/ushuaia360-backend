@@ -7,14 +7,28 @@ import uuid
 import asyncpg
 from quart import Blueprint, jsonify, request
 from db import get_conn
-from routes.trails import require_admin, generate_slug
+from models.review import PlaceReview
+from routes.trails import require_admin, generate_slug, require_auth
 from models.place import PlaceMedia
 from utils.validators import validate_required_fields
 
 places_bp = Blueprint("places", __name__)
 
 
-VALID_CATEGORIES = {"categoria_1", "categoria_2", "categoria_3"}
+# Debe alinearse con ushuaia360-frontend `src/lib/placeCategories.ts` (y app móvil `place-category-map.ts`).
+# Se mantienen categoria_1/2/3 por registros antiguos.
+VALID_CATEGORIES = {
+    "categoria_1",
+    "categoria_2",
+    "categoria_3",
+    "naturaleza",
+    "patrimonio",
+    "miradores",
+    "costa",
+    "cultura",
+    "gastronomia",
+    "otros",
+}
 
 
 def _parse_location(raw):
@@ -157,7 +171,7 @@ async def create_place(user_id: str):
         "name": string (requerido),
         "description": string (opcional),
         "slug": string (opcional, se genera a partir de name),
-        "category": "categoria_1" | "categoria_2" | "categoria_3" (requerido),
+        "category": slug de categoría (ver VALID_CATEGORIES en places.py) (requerido),
         "region": string (opcional),
         "country": string (opcional, default 'AR'),
         "location": { "latitude": float, "longitude": float } (requerido),
@@ -638,3 +652,171 @@ async def delete_place(place_id: str, user_id: str):
         await conn.execute("DELETE FROM tourist_places WHERE id = $1", place_uuid)
 
     return jsonify({"message": "Lugar eliminado exitosamente"}), 200
+
+
+@places_bp.route("/places/<place_id>/reviews", methods=["GET"])
+async def get_place_reviews(place_id: str):
+    """
+    Reseñas de un lugar turístico.
+
+    Query: limit (default 20), offset (default 0).
+    """
+    limit = request.args.get("limit", default=20, type=int)
+    offset = request.args.get("offset", default=0, type=int)
+
+    try:
+        place_uuid = uuid.UUID(place_id)
+    except ValueError:
+        return jsonify({"error": "ID de lugar inválido"}), 400
+
+    try:
+        async with get_conn() as conn:
+            place = await conn.fetchrow("SELECT id FROM tourist_places WHERE id = $1", place_uuid)
+            if not place:
+                return jsonify({"error": "Lugar no encontrado"}), 404
+
+            reviews = await conn.fetch(
+                """
+                SELECT pr.id, pr.place_id, users.id as user_id, users.full_name as name, users.avatar_url,
+                       pr.rating, pr.comment, pr.created_at
+                FROM place_reviews pr
+                LEFT JOIN users ON pr.user_id = users.id
+                WHERE pr.place_id = $1
+                ORDER BY pr.created_at DESC
+                LIMIT $2 OFFSET $3
+                """,
+                place_uuid,
+                limit,
+                offset,
+            )
+
+            total = await conn.fetchval(
+                "SELECT COUNT(*) FROM place_reviews WHERE place_id = $1",
+                place_uuid,
+            )
+
+            rating_stats = await conn.fetchrow(
+                """
+                SELECT
+                    COALESCE(AVG(rating), 0) AS average_rating,
+                    COUNT(*) FILTER (WHERE rating = 1) AS one_star,
+                    COUNT(*) FILTER (WHERE rating = 2) AS two_star,
+                    COUNT(*) FILTER (WHERE rating = 3) AS three_star,
+                    COUNT(*) FILTER (WHERE rating = 4) AS four_star,
+                    COUNT(*) FILTER (WHERE rating = 5) AS five_star
+                FROM place_reviews
+                WHERE place_id = $1
+                """,
+                place_uuid,
+            )
+    except asyncpg.exceptions.PostgresError as e:
+        if e.sqlstate in ("42P01", "42703"):
+            return jsonify({"error": str(e), "detail": "¿Ejecutaste db/migrations/005_place_reviews.sql?"}), 503
+        raise
+
+    reviews_list = []
+    for row in reviews:
+        review_dict = dict(row)
+        if review_dict.get("id"):
+            review_dict["id"] = str(review_dict["id"])
+        if review_dict.get("place_id"):
+            review_dict["place_id"] = str(review_dict["place_id"])
+        if review_dict.get("user_id"):
+            review_dict["user_id"] = str(review_dict["user_id"])
+        if review_dict.get("created_at"):
+            review_dict["created_at"] = review_dict["created_at"].isoformat()
+        reviews_list.append(review_dict)
+
+    average_rating = 0.0
+    rating_counts = {
+        "one_star": 0,
+        "two_star": 0,
+        "three_star": 0,
+        "four_star": 0,
+        "five_star": 0,
+    }
+    if rating_stats:
+        avg = rating_stats.get("average_rating")
+        average_rating = float(avg) if avg is not None else 0.0
+        rating_counts = {
+            "one_star": int(rating_stats.get("one_star") or 0),
+            "two_star": int(rating_stats.get("two_star") or 0),
+            "three_star": int(rating_stats.get("three_star") or 0),
+            "four_star": int(rating_stats.get("four_star") or 0),
+            "five_star": int(rating_stats.get("five_star") or 0),
+        }
+
+    return jsonify({
+        "reviews": reviews_list,
+        "total": total,
+        "average_rating": average_rating,
+        "rating_counts": rating_counts,
+        "limit": limit,
+        "offset": offset,
+    }), 200
+
+
+@places_bp.route("/places/<place_id>/reviews", methods=["POST"])
+@require_auth
+async def create_place_review(place_id: str, user_id: str):
+    data = await request.get_json()
+    if not data:
+        return jsonify({"error": "Datos requeridos"}), 400
+
+    required_fields = ["rating", "comment"]
+    error = validate_required_fields(data, required_fields)
+    if error:
+        return jsonify({"error": error}), 400
+
+    rating = data.get("rating")
+    if not isinstance(rating, int) or rating < 1 or rating > 5:
+        return jsonify({"error": "rating debe ser un entero entre 1 y 5"}), 400
+
+    comment = data.get("comment")
+    if not isinstance(comment, str) or len(comment.strip()) == 0:
+        return jsonify({"error": "comment no puede estar vacío"}), 400
+
+    try:
+        place_uuid = uuid.UUID(place_id)
+    except ValueError:
+        return jsonify({"error": "ID de lugar inválido"}), 400
+
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        return jsonify({"error": "ID de usuario inválido"}), 400
+
+    try:
+        async with get_conn() as conn:
+            place = await conn.fetchrow("SELECT id FROM tourist_places WHERE id = $1", place_uuid)
+            if not place:
+                return jsonify({"error": "Lugar no encontrado"}), 404
+
+            user = await conn.fetchrow("SELECT id FROM users WHERE id = $1", user_uuid)
+            if not user:
+                return jsonify({"error": "Usuario no encontrado"}), 404
+
+            review = await conn.fetchrow(
+                """
+                INSERT INTO place_reviews (place_id, user_id, rating, comment)
+                VALUES ($1, $2, $3, $4)
+                RETURNING *
+                """,
+                place_uuid,
+                user_uuid,
+                rating,
+                comment.strip(),
+            )
+    except asyncpg.exceptions.PostgresError as e:
+        if e.sqlstate in ("42P01", "42703"):
+            return jsonify({"error": str(e), "detail": "¿Ejecutaste db/migrations/005_place_reviews.sql?"}), 503
+        raise
+
+    if not review:
+        return jsonify({"error": "Error al crear la reseña"}), 500
+
+    review_model = PlaceReview.from_row(review)
+    return jsonify({
+        "message": "Reseña creada exitosamente",
+        "review": review_model.to_dict(),
+    }), 201
