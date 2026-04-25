@@ -11,6 +11,7 @@ from routes.favorites import favorites_bp
 from routes.map_markers import map_bp
 from routes.places import places_bp
 from routes.trail_history import trail_history_bp
+from routes.uploads import uploads_bp
 
 def register_routes(app):
     """Registra todos los blueprints de rutas"""
@@ -38,3 +39,6 @@ def register_routes(app):
 
     # Historial de recorridos (/me/trail-history/*)
     app.register_blueprint(trail_history_bp, url_prefix='/api/v1')
+
+    # Subidas (app móvil; p. ej. fotos de reseñas → Supabase `reviews`)
+    app.register_blueprint(uploads_bp, url_prefix='/api/v1')

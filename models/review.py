@@ -15,6 +15,7 @@ class TrailReview(BaseModel):
         self.user_id = kwargs.get('user_id')
         self.rating = kwargs.get('rating')  # 1-5
         self.comment = kwargs.get('comment')
+        self.image_urls = kwargs.get('image_urls') or []
         self.created_at = kwargs.get('created_at')
     
     def to_dict(self) -> dict:
@@ -40,6 +41,7 @@ class PlaceReview(BaseModel):
         self.user_id = kwargs.get('user_id')
         self.rating = kwargs.get('rating')
         self.comment = kwargs.get('comment')
+        self.image_urls = kwargs.get('image_urls') or []
         self.created_at = kwargs.get('created_at')
 
     def to_dict(self) -> dict:

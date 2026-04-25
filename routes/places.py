@@ -11,6 +11,7 @@ from models.review import PlaceReview
 from routes.trails import require_admin, generate_slug, require_auth
 from models.place import PlaceMedia
 from utils.validators import validate_required_fields
+from utils.review_images import parse_and_validate_review_image_urls
 
 places_bp = Blueprint("places", __name__)
 
@@ -678,7 +679,7 @@ async def get_place_reviews(place_id: str):
             reviews = await conn.fetch(
                 """
                 SELECT pr.id, pr.place_id, users.id as user_id, users.full_name as name, users.avatar_url,
-                       pr.rating, pr.comment, pr.created_at
+                       pr.rating, pr.comment, pr.image_urls, pr.created_at
                 FROM place_reviews pr
                 LEFT JOIN users ON pr.user_id = users.id
                 WHERE pr.place_id = $1
@@ -725,6 +726,8 @@ async def get_place_reviews(place_id: str):
             review_dict["user_id"] = str(review_dict["user_id"])
         if review_dict.get("created_at"):
             review_dict["created_at"] = review_dict["created_at"].isoformat()
+        urls = review_dict.get("image_urls")
+        review_dict["image_urls"] = list(urls) if urls else []
         reviews_list.append(review_dict)
 
     average_rating = 0.0
@@ -777,6 +780,11 @@ async def create_place_review(place_id: str, user_id: str):
         return jsonify({"error": "comment no puede estar vacío"}), 400
 
     try:
+        image_urls = parse_and_validate_review_image_urls(data.get("image_urls"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    try:
         place_uuid = uuid.UUID(place_id)
     except ValueError:
         return jsonify({"error": "ID de lugar inválido"}), 400
@@ -798,18 +806,19 @@ async def create_place_review(place_id: str, user_id: str):
 
             review = await conn.fetchrow(
                 """
-                INSERT INTO place_reviews (place_id, user_id, rating, comment)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO place_reviews (place_id, user_id, rating, comment, image_urls)
+                VALUES ($1, $2, $3, $4, $5::text[])
                 RETURNING *
                 """,
                 place_uuid,
                 user_uuid,
                 rating,
                 comment.strip(),
+                image_urls,
             )
     except asyncpg.exceptions.PostgresError as e:
         if e.sqlstate in ("42P01", "42703"):
-            return jsonify({"error": str(e), "detail": "¿Ejecutaste db/migrations/005_place_reviews.sql?"}), 503
+            return jsonify({"error": str(e), "detail": "¿Ejecutaste db/migrations/005_place_reviews.sql o 006_review_image_urls.sql?"}), 503
         raise
 
     if not review:

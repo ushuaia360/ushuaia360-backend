@@ -3,12 +3,14 @@ Trails routes - Creación y gestión de senderos y sus rutas
 """
 from quart import Blueprint, request, jsonify, current_app
 from functools import wraps
+import asyncpg
 from db import get_conn
 from routes.auth import decode_jwt_token
 from models.trail import Trail, TrailRoute, RouteSegment, TrailPoint
 from models.media import TrailMedia
 from models.review import TrailReview
 from utils.validators import validate_required_fields
+from utils.review_images import parse_and_validate_review_image_urls
 from decimal import Decimal
 import uuid
 import re
@@ -1608,7 +1610,7 @@ async def get_trail_reviews(trail_id: str):
         
         # Obtener las reseñas con paginación
         reviews = await conn.fetch("""
-            SELECT tr.id, tr.trail_id, users.id as user_id, users.full_name as name, users.avatar_url, tr.rating, tr.comment, tr.created_at
+            SELECT tr.id, tr.trail_id, users.id as user_id, users.full_name as name, users.avatar_url, tr.rating, tr.comment, tr.image_urls, tr.created_at
             FROM trail_reviews tr
             LEFT JOIN users ON tr.user_id = users.id
             WHERE trail_id = $1
@@ -1653,6 +1655,8 @@ async def get_trail_reviews(trail_id: str):
             # Convertir datetime a ISO format
             if review_dict.get('created_at'):
                 review_dict['created_at'] = review_dict['created_at'].isoformat()
+            urls = review_dict.get("image_urls")
+            review_dict["image_urls"] = list(urls) if urls else []
             reviews_list.append(review_dict)
 
         # Normalizar métricas para respuesta JSON
@@ -1721,6 +1725,11 @@ async def create_trail_review(trail_id: str, user_id: str):
     comment = data.get("comment")
     if not isinstance(comment, str) or len(comment.strip()) == 0:
         return jsonify({"error": "comment no puede estar vacío"}), 400
+
+    try:
+        image_urls = parse_and_validate_review_image_urls(data.get("image_urls"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     
     # Validar ID del trail
     try:
@@ -1747,12 +1756,20 @@ async def create_trail_review(trail_id: str, user_id: str):
         
         # Insertar la reseña en la tabla trail_reviews
         query = """
-            INSERT INTO trail_reviews (trail_id, user_id, rating, comment)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO trail_reviews (trail_id, user_id, rating, comment, image_urls)
+            VALUES ($1, $2, $3, $4, $5::text[])
             RETURNING *
         """
         
-        review = await conn.fetchrow(query, trail_uuid, user_uuid, rating, comment)
+        try:
+            review = await conn.fetchrow(query, trail_uuid, user_uuid, rating, comment, image_urls)
+        except asyncpg.exceptions.UndefinedColumnError:
+            return jsonify(
+                {
+                    "error": "Columna image_urls no encontrada",
+                    "detail": "Ejecutá db/migrations/006_review_image_urls.sql",
+                }
+            ), 503
         
         if not review:
             return jsonify({"error": "Error al crear la reseña"}), 500
