@@ -2,16 +2,15 @@
 Email service using Resend
 """
 import httpx
-import os
-from datetime import datetime, timedelta
-import jwt
 from quart import current_app
 
 
 async def send_verification_email(email: str, token: str):
     """Send email verification email"""
-    frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
-    link = f"{frontend_url}/verify-email?token={token}"
+    frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000').rstrip('/')
+    scheme = (current_app.config.get('MOBILE_DEEP_LINK_SCHEME') or 'ushuaia360').strip().rstrip(':/')
+    web_link = f"{frontend_url}/verify?token={token}"
+    app_link = f"{scheme}://verify?token={token}"
     subject = "Verificá tu cuenta en Ushuaia360"
     
     html = f"""
@@ -53,7 +52,7 @@ async def send_verification_email(email: str, token: str):
                                 <table role="presentation" style="width: 100%; margin: 30px 0;">
                                     <tr>
                                         <td align="center" style="padding: 20px 0;">
-                                            <a href="{link}" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-size: 16px; font-weight: 600; box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3); transition: all 0.3s;">
+                                            <a href="{web_link}" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-size: 16px; font-weight: 600; box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3); transition: all 0.3s;">
                                                 Verificar mi cuenta
                                             </a>
                                         </td>
@@ -64,9 +63,12 @@ async def send_verification_email(email: str, token: str):
                                     Este enlace estará disponible por <strong style="color: #f97316;">24 horas</strong>.
                                 </p>
                                 
+                                <p style="margin: 24px 0 0 0; color: #64748b; font-size: 14px; line-height: 1.6;">
+                                    ¿Tenés la app instalada? <a href="{app_link}" style="color: #3b82f6; font-weight: 600;">Verificar en la app</a>
+                                </p>
                                 <p style="margin: 20px 0 0 0; color: #94a3b8; font-size: 14px; line-height: 1.6;">
                                     Si el botón no funciona, copiá y pegá este enlace en tu navegador:<br>
-                                    <a href="{link}" style="color: #3b82f6; word-break: break-all;">{link}</a>
+                                    <a href="{web_link}" style="color: #3b82f6; word-break: break-all;">{web_link}</a>
                                 </p>
                             </td>
                         </tr>
@@ -115,8 +117,10 @@ async def send_verification_email(email: str, token: str):
 
 async def send_password_reset_email(email: str, token: str):
     """Send password reset email"""
-    frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000')
-    link = f"{frontend_url}/reset-password?token={token}"
+    frontend_url = current_app.config.get('FRONTEND_URL', 'http://localhost:3000').rstrip('/')
+    scheme = (current_app.config.get('MOBILE_DEEP_LINK_SCHEME') or 'ushuaia360').strip().rstrip(':/')
+    web_link = f"{frontend_url}/reset-password?token={token}"
+    app_link = f"{scheme}://reset-password?token={token}"
     subject = "Restablecé tu contraseña en Ushuaia360"
     
     html = f"""
@@ -158,7 +162,7 @@ async def send_password_reset_email(email: str, token: str):
                                 <table role="presentation" style="width: 100%; margin: 30px 0;">
                                     <tr>
                                         <td align="center" style="padding: 20px 0;">
-                                            <a href="{link}" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-size: 16px; font-weight: 600; box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3);">
+                                            <a href="{web_link}" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-size: 16px; font-weight: 600; box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3);">
                                                 Restablecer contraseña
                                             </a>
                                         </td>
@@ -169,9 +173,12 @@ async def send_password_reset_email(email: str, token: str):
                                     Este enlace estará disponible por <strong style="color: #f97316;">1 hora</strong>.
                                 </p>
                                 
+                                <p style="margin: 24px 0 0 0; color: #64748b; font-size: 14px; line-height: 1.6;">
+                                    ¿Tenés la app instalada? <a href="{app_link}" style="color: #3b82f6; font-weight: 600;">Restablecer en la app</a>
+                                </p>
                                 <p style="margin: 20px 0 0 0; color: #94a3b8; font-size: 14px; line-height: 1.6;">
                                     Si el botón no funciona, copiá y pegá este enlace en tu navegador:<br>
-                                    <a href="{link}" style="color: #3b82f6; word-break: break-all;">{link}</a>
+                                    <a href="{web_link}" style="color: #3b82f6; word-break: break-all;">{web_link}</a>
                                 </p>
                                 
                                 <p style="margin: 30px 0 0 0; color: #ef4444; font-size: 14px; line-height: 1.6;">

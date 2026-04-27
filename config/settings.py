@@ -36,8 +36,11 @@ class Config:
     RESEND_API_KEY = os.getenv('RESEND_API_KEY')
     RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', 'noreply@ushuaia360.com')
     
-    # Frontend URL
-    FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+    # Frontend URL (Next.js: páginas /verify, /reset-password)
+    FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000').rstrip('/')
+
+    # Deep link scheme de la app móvil (expo scheme en app.json)
+    MOBILE_DEEP_LINK_SCHEME = os.getenv('MOBILE_DEEP_LINK_SCHEME', 'ushuaia360')
     
     # API
     API_VERSION = '1.0'
