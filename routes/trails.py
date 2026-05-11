@@ -209,6 +209,9 @@ async def list_trails(user_id: str = None):  # user_id es opcional cuando no se 
     is_featured_str = request.args.get("is_featured")
     limit = request.args.get("limit", default=20, type=int)
     offset = request.args.get("offset", default=0, type=int)
+    limit = min(max(limit or 20, 1), 100)
+    offset = max(offset or 0, 0)
+    search = (request.args.get("search") or request.args.get("q") or "").strip()
 
     is_featured = None
     if is_featured_str is not None:
@@ -234,7 +237,15 @@ async def list_trails(user_id: str = None):  # user_id es opcional cuando no se 
             param_count += 1
             conditions.append(f"t.is_featured = ${param_count}")
             params.append(is_featured)
-        
+
+        if search:
+            param_count += 1
+            conditions.append(
+                f"(COALESCE(t.name::text,'') || ' ' || COALESCE(t.slug::text,'') "
+                f"|| ' ' || COALESCE(t.region::text,'')) ILIKE ${param_count}"
+            )
+            params.append(f"%{search}%")
+
         where_clause = ""
         if conditions:
             where_clause = "WHERE " + " AND ".join(conditions)

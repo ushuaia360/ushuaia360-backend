@@ -76,6 +76,9 @@ async def list_places():
     country = request.args.get("country")
     limit = request.args.get("limit", default=20, type=int)
     offset = request.args.get("offset", default=0, type=int)
+    limit = min(max(limit or 20, 1), 100)
+    offset = max(offset or 0, 0)
+    search = (request.args.get("search") or request.args.get("q") or "").strip()
 
     conditions = []
     params: list = []
@@ -95,6 +98,14 @@ async def list_places():
         param_count += 1
         conditions.append(f"p.country = ${param_count}")
         params.append(country)
+
+    if search:
+        param_count += 1
+        conditions.append(
+            f"(COALESCE(p.name::text,'') || ' ' || COALESCE(p.slug::text,'') "
+            f"|| ' ' || COALESCE(p.region::text,'') || ' ' || COALESCE(p.country::text,'')) ILIKE ${param_count}"
+        )
+        params.append(f"%{search}%")
 
     where_clause = ""
     if conditions:
