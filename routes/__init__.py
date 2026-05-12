@@ -13,6 +13,7 @@ from routes.places import places_bp
 from routes.trail_history import trail_history_bp
 from routes.uploads import uploads_bp
 from routes.dashboard import dashboard_bp
+from routes.search import search_bp
 
 def register_routes(app):
     """Registra todos los blueprints de rutas"""
@@ -43,6 +44,9 @@ def register_routes(app):
 
     # Subidas (app móvil; p. ej. fotos de reseñas → Supabase `reviews`)
     app.register_blueprint(uploads_bp, url_prefix='/api/v1')
+
+    # Búsqueda / autocomplete (app móvil)
+    app.register_blueprint(search_bp, url_prefix='/api/v1')
 
     # Estadísticas dashboard admin
     app.register_blueprint(dashboard_bp, url_prefix='/api/v1')
