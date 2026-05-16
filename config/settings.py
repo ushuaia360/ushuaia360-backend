@@ -41,6 +41,9 @@ class Config:
 
     # Deep link scheme de la app móvil (expo scheme en app.json)
     MOBILE_DEEP_LINK_SCHEME = os.getenv('MOBILE_DEEP_LINK_SCHEME', 'ushuaia360')
+
+    # RevenueCat
+    REVENUECAT_WEBHOOK_SECRET = os.getenv('REVENUECAT_WEBHOOK_SECRET', '')
     
     # API
     API_VERSION = '1.0'

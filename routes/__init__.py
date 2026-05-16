@@ -13,6 +13,7 @@ from routes.places import places_bp
 from routes.trail_history import trail_history_bp
 from routes.uploads import uploads_bp
 from routes.dashboard import dashboard_bp
+from routes.subscriptions import subscriptions_bp
 from routes.search import search_bp
 
 def register_routes(app):
@@ -50,3 +51,6 @@ def register_routes(app):
 
     # Estadísticas dashboard admin
     app.register_blueprint(dashboard_bp, url_prefix='/api/v1')
+
+    # Webhooks externos
+    app.register_blueprint(subscriptions_bp, url_prefix='/api/v1')
