@@ -51,6 +51,45 @@ class Trail(BaseModel):
         return result
 
 
+class TrailEmergencyPoint(BaseModel):
+    """Modelo para trail_emergency_points"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.id = kwargs.get('id')
+        self.trail_id = kwargs.get('trail_id')
+        self.name = kwargs.get('name')
+        self.description = kwargs.get('description')
+        self.phone = kwargs.get('phone')
+        self.location = kwargs.get('location')
+        self.order_index = kwargs.get('order_index', 0)
+        self.created_at = kwargs.get('created_at')
+        self.updated_at = kwargs.get('updated_at')
+
+    def to_dict(self) -> dict:
+        result = super().to_dict()
+        if result.get('id'):
+            result['id'] = str(result['id'])
+        if result.get('trail_id'):
+            result['trail_id'] = str(result['trail_id'])
+        if result.get('location') and isinstance(result['location'], str):
+            import re
+            match = re.search(r'POINTZ?\s*\(([^)]+)\)', result['location'])
+            if match:
+                coords = match.group(1).strip().split()
+                if len(coords) >= 2:
+                    result['location'] = {
+                        'longitude': float(coords[0]),
+                        'latitude': float(coords[1]),
+                        'elevation': float(coords[2]) if len(coords) > 2 else 0,
+                    }
+        if result.get('created_at') and hasattr(result['created_at'], 'isoformat'):
+            result['created_at'] = result['created_at'].isoformat()
+        if result.get('updated_at') and hasattr(result['updated_at'], 'isoformat'):
+            result['updated_at'] = result['updated_at'].isoformat()
+        return result
+
+
 class TrailRoute(BaseModel):
     """Modelo para trail_routes"""
     

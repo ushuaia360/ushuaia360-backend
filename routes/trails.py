@@ -6,7 +6,7 @@ from functools import wraps
 import asyncpg
 from db import get_conn
 from routes.auth import decode_jwt_token
-from models.trail import Trail, TrailRoute, RouteSegment, TrailPoint
+from models.trail import Trail, TrailRoute, RouteSegment, TrailPoint, TrailEmergencyPoint
 from models.media import TrailMedia
 from models.review import TrailReview
 from utils.validators import validate_required_fields
@@ -646,6 +646,30 @@ async def get_trail(trail_id: str, user_id: str = None):
                 point_dict['media'].append(pm_dict)
 
             trail_dict['points'].append(point_dict)
+
+        # Puntos de emergencia
+        trail_dict['emergency_points'] = []
+        try:
+            emergency_rows = await conn.fetch("""
+                SELECT id, trail_id, name, description, phone, location, order_index, created_at, updated_at
+                FROM trail_emergency_points
+                WHERE trail_id = $1
+                ORDER BY order_index ASC, created_at ASC
+            """, trail_uuid)
+            for row in emergency_rows:
+                ep_dict = dict(row)
+                ep_dict['location'] = _normalize_trail_point_location(ep_dict.get('location'))
+                if ep_dict.get('id'):
+                    ep_dict['id'] = str(ep_dict['id'])
+                if ep_dict.get('trail_id'):
+                    ep_dict['trail_id'] = str(ep_dict['trail_id'])
+                if ep_dict.get('created_at'):
+                    ep_dict['created_at'] = ep_dict['created_at'].isoformat()
+                if ep_dict.get('updated_at'):
+                    ep_dict['updated_at'] = ep_dict['updated_at'].isoformat()
+                trail_dict['emergency_points'].append(ep_dict)
+        except asyncpg.UndefinedTableError:
+            pass
         
         return jsonify({
             "trail": trail_dict
@@ -1274,6 +1298,206 @@ async def delete_trail_point(trail_id: str, point_id: str, user_id: str):
         )
 
     return jsonify({"message": "Punto eliminado exitosamente"}), 200
+
+
+@trails_bp.route("/trails/<trail_id>/emergency-points", methods=["POST"])
+@require_admin
+async def create_trail_emergency_point(trail_id: str, user_id: str):
+    """
+    Crear un punto de emergencia en el sendero.
+
+    Body:
+    {
+        "name": string (requerido),
+        "description": string (opcional),
+        "phone": string (requerido),
+        "location": { "longitude": float, "latitude": float, "elevation": float? } (requerido),
+        "order_index": int (opcional)
+    }
+    """
+    data = await request.get_json() or {}
+
+    required_fields = ["name", "phone", "location"]
+    validation_error = validate_required_fields(data, required_fields)
+    if validation_error:
+        return jsonify({"error": validation_error}), 400
+
+    location = data["location"]
+    if not isinstance(location, dict) or "longitude" not in location or "latitude" not in location:
+        return jsonify({"error": "location debe tener 'longitude' y 'latitude'"}), 400
+
+    longitude = location["longitude"]
+    latitude = location["latitude"]
+    elevation = location.get("elevation", 0)
+    if not isinstance(longitude, (int, float)) or not isinstance(latitude, (int, float)):
+        return jsonify({"error": "longitude y latitude deben ser números"}), 400
+    if not isinstance(elevation, (int, float)):
+        elevation = 0
+
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+    except ValueError:
+        return jsonify({"error": "ID de trail inválido"}), 400
+
+    async with get_conn() as conn:
+        trail = await conn.fetchrow("SELECT id FROM trails WHERE id = $1", trail_uuid)
+        if not trail:
+            return jsonify({"error": "Trail no encontrado"}), 404
+
+        fields = ["trail_id", "name", "phone", "location"]
+        values = [
+            trail_uuid,
+            str(data["name"]).strip(),
+            str(data["phone"]).strip(),
+            json.dumps({
+                "longitude": longitude,
+                "latitude": latitude,
+                "elevation": elevation,
+            }),
+        ]
+        placeholders = ["$1", "$2", "$3", "$4::jsonb"]
+        param_count = 4
+
+        if data.get("description") is not None:
+            param_count += 1
+            fields.append("description")
+            values.append(data["description"])
+            placeholders.append(f"${param_count}")
+
+        if data.get("order_index") is not None:
+            param_count += 1
+            fields.append("order_index")
+            values.append(data["order_index"])
+            placeholders.append(f"${param_count}")
+
+        query = f"""
+            INSERT INTO trail_emergency_points ({', '.join(fields)})
+            VALUES ({', '.join(placeholders)})
+            RETURNING *
+        """
+        try:
+            row = await conn.fetchrow(query, *values)
+        except asyncpg.UndefinedTableError:
+            return jsonify({
+                "error": "Tabla trail_emergency_points no existe. Ejecutá db/migrations/007_trail_emergency_points.sql",
+            }), 503
+
+        if not row:
+            return jsonify({"error": "Error al crear el punto de emergencia"}), 500
+
+        point_model = TrailEmergencyPoint.from_row(row)
+        return jsonify({
+            "message": "Punto de emergencia creado exitosamente",
+            "emergency_point": point_model.to_dict(),
+        }), 201
+
+
+@trails_bp.route("/trails/<trail_id>/emergency-points/<point_id>", methods=["PUT", "PATCH"])
+@require_admin
+async def update_trail_emergency_point(trail_id: str, point_id: str, user_id: str):
+    """Actualizar un punto de emergencia."""
+    data = await request.get_json()
+    if not data:
+        return jsonify({"error": "Datos requeridos"}), 400
+
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+        point_uuid = uuid.UUID(point_id)
+    except ValueError:
+        return jsonify({"error": "ID de trail o point inválido"}), 400
+
+    location_json = None
+    if "location" in data:
+        loc = data["location"]
+        if loc is None:
+            return jsonify({"error": "location no puede ser null"}), 400
+        if not isinstance(loc, dict) or "longitude" not in loc or "latitude" not in loc:
+            return jsonify({"error": "location debe tener 'longitude' y 'latitude'"}), 400
+        elevation = loc.get("elevation", 0)
+        if not isinstance(elevation, (int, float)):
+            elevation = 0
+        location_json = json.dumps({
+            "longitude": loc["longitude"],
+            "latitude": loc["latitude"],
+            "elevation": elevation,
+        })
+
+    async with get_conn() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id FROM trail_emergency_points WHERE id = $1 AND trail_id = $2",
+            point_uuid, trail_uuid,
+        )
+        if not existing:
+            return jsonify({"error": "Punto de emergencia no encontrado o no pertenece al trail"}), 404
+
+        updates = ["updated_at = NOW()"]
+        values = []
+        param_count = 0
+
+        for key, db_field in [
+            ("name", "name"),
+            ("description", "description"),
+            ("phone", "phone"),
+            ("order_index", "order_index"),
+        ]:
+            if key in data:
+                param_count += 1
+                updates.append(f"{db_field} = ${param_count}")
+                values.append(data[key])
+
+        if location_json is not None:
+            param_count += 1
+            updates.append(f"location = ${param_count}::jsonb")
+            values.append(location_json)
+
+        if len(updates) <= 1:
+            return jsonify({"error": "No hay campos para actualizar"}), 400
+
+        param_count += 1
+        values.append(point_uuid)
+        where_param = param_count
+
+        query = f"""
+            UPDATE trail_emergency_points
+            SET {', '.join(updates)}
+            WHERE id = ${where_param}
+            RETURNING *
+        """
+        row = await conn.fetchrow(query, *values)
+        if not row:
+            return jsonify({"error": "Error al actualizar el punto de emergencia"}), 500
+
+        point_model = TrailEmergencyPoint.from_row(row)
+        return jsonify({
+            "message": "Punto de emergencia actualizado exitosamente",
+            "emergency_point": point_model.to_dict(),
+        }), 200
+
+
+@trails_bp.route("/trails/<trail_id>/emergency-points/<point_id>", methods=["DELETE"])
+@require_admin
+async def delete_trail_emergency_point(trail_id: str, point_id: str, user_id: str):
+    """Eliminar un punto de emergencia."""
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+        point_uuid = uuid.UUID(point_id)
+    except ValueError:
+        return jsonify({"error": "ID de trail o point inválido"}), 400
+
+    async with get_conn() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id FROM trail_emergency_points WHERE id = $1 AND trail_id = $2",
+            point_uuid, trail_uuid,
+        )
+        if not existing:
+            return jsonify({"error": "Punto de emergencia no encontrado o no pertenece al trail"}), 404
+
+        await conn.execute(
+            "DELETE FROM trail_emergency_points WHERE id = $1 AND trail_id = $2",
+            point_uuid, trail_uuid,
+        )
+
+    return jsonify({"message": "Punto de emergencia eliminado exitosamente"}), 200
 
 
 @trails_bp.route("/trails/<trail_id>/media", methods=["POST"])

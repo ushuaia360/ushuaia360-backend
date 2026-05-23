@@ -4,7 +4,7 @@ Modelos de datos
 from models.base import BaseModel
 from models.status import TrailStatus, SubscriptionStatus
 from models.user import User
-from models.trail import Trail, TrailRoute, RouteSegment, RouteElevationProfile, TrailPoint
+from models.trail import Trail, TrailRoute, RouteSegment, RouteElevationProfile, TrailPoint, TrailEmergencyPoint
 from models.place import TouristPlace, PlaceMedia
 from models.media import TrailMedia
 from models.review import TrailReview
@@ -23,6 +23,7 @@ __all__ = [
     'RouteSegment',
     'RouteElevationProfile',
     'TrailPoint',
+    'TrailEmergencyPoint',
     'TouristPlace',
     'PlaceMedia',
     'TrailMedia',
