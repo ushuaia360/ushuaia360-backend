@@ -124,7 +124,7 @@ async def list_places():
                 f"""
                 SELECT
                     p.id, p.slug, p.name, p.category, p.region, p.country,
-                    p.description, p.is_premium,
+                    p.description, p.is_premium, p.contact_link,
                     p.location::text AS location,
                     p.created_at, p.updated_at,
                     (SELECT url FROM place_media
@@ -228,6 +228,7 @@ async def create_place(user_id: str):
         slug = "lugar"
 
     description = data.get("description")
+    contact_link = data.get("contact_link")
     region = data.get("region")
     country = data.get("country") or "AR"
     is_premium = data.get("is_premium", False)
@@ -257,11 +258,11 @@ async def create_place(user_id: str):
             row = await conn.fetchrow(
                 """
                 INSERT INTO tourist_places
-                    (slug, name, category, region, country, description, is_premium, location)
+                    (slug, name, category, region, country, description, contact_link, is_premium, location)
                 VALUES
-                    ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                    ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
                 RETURNING
-                    id, slug, name, category, region, country, description, is_premium,
+                    id, slug, name, category, region, country, description, contact_link, is_premium,
                     location::text AS location,
                     created_at, updated_at
                 """,
@@ -271,6 +272,7 @@ async def create_place(user_id: str):
                 region,
                 country,
                 description,
+                contact_link.strip() if isinstance(contact_link, str) and contact_link.strip() else None,
                 bool(is_premium),
                 location_json,
             )
@@ -420,7 +422,7 @@ async def get_place(place_id: str):
                 """
                 SELECT
                     p.id, p.slug, p.name, p.category, p.region, p.country,
-                    p.description, p.is_premium,
+                    p.description, p.is_premium, p.contact_link,
                     p.location::text AS location,
                     p.created_at, p.updated_at,
                     ARRAY(
@@ -546,6 +548,14 @@ async def update_place(place_id: str, user_id: str):
                 updates.append(f"description = ${param_count}")
                 values.append(data["description"])
 
+            if "contact_link" in data:
+                param_count += 1
+                cl = data["contact_link"]
+                if cl is not None and isinstance(cl, str):
+                    cl = cl.strip() or None
+                updates.append(f"contact_link = ${param_count}")
+                values.append(cl)
+
             if "region" in data:
                 param_count += 1
                 updates.append(f"region = ${param_count}")
@@ -616,7 +626,7 @@ async def update_place(place_id: str, user_id: str):
                 SET {", ".join(updates)}
                 WHERE id = ${where_param}
                 RETURNING
-                    id, slug, name, category, region, country, description, is_premium,
+                    id, slug, name, category, region, country, description, contact_link, is_premium,
                     location::text AS location,
                     created_at, updated_at
             """

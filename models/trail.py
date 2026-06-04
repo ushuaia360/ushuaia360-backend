@@ -28,6 +28,7 @@ class Trail(BaseModel):
         self.map_point = kwargs.get('map_point')  # GEOGRAPHY(Point, 4326)
         self.is_featured = kwargs.get('is_featured', False)
         self.is_premium = kwargs.get('is_premium', False)
+        self.contact_link = kwargs.get('contact_link')
         self.status_id = kwargs.get('status_id')
         self.created_by = kwargs.get('created_by')
         self.created_at = kwargs.get('created_at')

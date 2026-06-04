@@ -32,7 +32,7 @@ def require_admin():
 
 @users_bp.route("/users", methods=["GET"])
 async def get_all_users():
-    """Lista usuarios (solo admin). Query: limit, offset, search, role, suspended."""
+    """Lista usuarios (solo admin). Query: limit, offset, search, role, suspended, premium."""
     user_id, error_response, status_code = require_admin()
     if error_response:
         return error_response, status_code
@@ -45,6 +45,7 @@ async def get_all_users():
     search = (request.args.get("search") or request.args.get("q") or "").strip()
     role = (request.args.get("role") or "").strip().lower()
     suspended = request.args.get("suspended")
+    premium = request.args.get("premium")
 
     async with get_conn() as conn:
         admin_row = await conn.fetchrow(
@@ -87,6 +88,17 @@ async def get_all_users():
                 conditions.append(f"COALESCE(u.is_suspended, FALSE) = ${n}")
                 params.append(False)
 
+        if premium is not None and str(premium).strip() != "":
+            pv = str(premium).strip().lower()
+            if pv in ("true", "1", "yes"):
+                n += 1
+                conditions.append(f"COALESCE(u.is_premium, FALSE) = ${n}")
+                params.append(True)
+            elif pv in ("false", "0", "no"):
+                n += 1
+                conditions.append(f"COALESCE(u.is_premium, FALSE) = ${n}")
+                params.append(False)
+
         where_sql = ""
         if conditions:
             where_sql = "WHERE " + " AND ".join(conditions)
@@ -103,7 +115,7 @@ async def get_all_users():
         users = await conn.fetch(
             f"""
             SELECT id, email, full_name, avatar_url, language, is_admin,
-                   is_premium, email_verified, is_suspended, created_at
+                   is_premium, premium_until, email_verified, is_suspended, created_at
             FROM users u
             {where_sql}
             ORDER BY u.created_at DESC
@@ -116,6 +128,8 @@ async def get_all_users():
     for u in users:
         user_dict = dict(u)
         user_dict["id"] = str(user_dict["id"])
+        if user_dict.get("premium_until"):
+            user_dict["premium_until"] = user_dict["premium_until"].isoformat()
         users_list.append(user_dict)
 
     return jsonify({

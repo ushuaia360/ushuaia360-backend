@@ -263,7 +263,7 @@ async def list_trails(user_id: str = None):  # user_id es opcional cuando no se 
                 t.id, t.slug, t.name, t.difficulty, t.route_type, t.region,
                 t.distance_km, t.elevation_gain, t.elevation_loss,
                 t.max_altitude, t.min_altitude, t.duration_minutes,
-                t.is_featured, t.is_premium, t.status_id, t.created_by,
+                t.is_featured, t.is_premium, t.contact_link, t.status_id, t.created_by,
                 t.created_at, t.updated_at, t.description,
                 t.map_point::text AS map_point,
                 (SELECT url FROM trail_media
@@ -443,6 +443,7 @@ async def create_trail(user_id: str):
             "duration_minutes": "duration_minutes",
             "is_featured": "is_featured",
             "is_premium": "is_premium",
+            "contact_link": "contact_link",
             "status_id": "status_id"
         }
         
@@ -507,7 +508,7 @@ async def get_trail(trail_id: str, user_id: str = None):
             SELECT 
                 t.id, t.slug, t.name, t.difficulty, t.route_type, t.region,
                 t.distance_km, t.elevation_gain, t.elevation_loss, t.max_altitude, t.min_altitude,
-                t.duration_minutes, t.is_featured, t.is_premium, t.status_id, t.created_by,
+                t.duration_minutes, t.is_featured, t.is_premium, t.contact_link, t.status_id, t.created_by,
                 t.created_at, t.updated_at, t.description,
                 t.map_point::text AS map_point,
                 ARRAY(SELECT url FROM trail_media
@@ -749,6 +750,14 @@ async def update_trail(trail_id: str, user_id: str):
             "status_id": "status_id",
             "slug": "slug"
         }
+
+        if "contact_link" in data:
+            param_count += 1
+            cl = data["contact_link"]
+            if isinstance(cl, str):
+                cl = cl.strip() or None
+            updates.append(f"contact_link = ${param_count}")
+            values.append(cl)
         
         for key, db_field in updatable_fields.items():
             if key in data and data[key] is not None:
