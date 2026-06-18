@@ -47,6 +47,7 @@ class Config:
 
     # Google Sign-In
     GOOGLE_WEB_CLIENT_ID = os.getenv('GOOGLE_WEB_CLIENT_ID', '')
+    GOOGLE_IOS_CLIENT_ID = os.getenv('GOOGLE_IOS_CLIENT_ID', '')
     
     # API
     API_VERSION = '1.0'

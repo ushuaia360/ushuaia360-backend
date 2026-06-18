@@ -658,9 +658,13 @@ async def google_login_app():
         return jsonify({"error": "id_token requerido"}), 400
 
     google_web_client_id = current_app.config.get("GOOGLE_WEB_CLIENT_ID")
+    google_ios_client_id = current_app.config.get("GOOGLE_IOS_CLIENT_ID")
     if not google_web_client_id:
         current_app.logger.error("GOOGLE_WEB_CLIENT_ID no configurado")
         return jsonify({"error": "Google Sign-In no configurado"}), 500
+
+    # Aceptar tanto el web client ID como el iOS client ID como audiencias válidas
+    valid_audiences = [a for a in [google_web_client_id, google_ios_client_id] if a]
 
     try:
         jwks_client = PyJWKClient(GOOGLE_JWKS_URL)
@@ -669,7 +673,7 @@ async def google_login_app():
             id_token,
             signing_key.key,
             algorithms=["RS256"],
-            audience=google_web_client_id,
+            audience=valid_audiences,
             issuer=GOOGLE_ISSUER,
         )
         google_user_id = claims["sub"]
