@@ -44,6 +44,9 @@ class Config:
 
     # RevenueCat
     REVENUECAT_WEBHOOK_SECRET = os.getenv('REVENUECAT_WEBHOOK_SECRET', '')
+
+    # Google Sign-In
+    GOOGLE_WEB_CLIENT_ID = os.getenv('GOOGLE_WEB_CLIENT_ID', '')
     
     # API
     API_VERSION = '1.0'

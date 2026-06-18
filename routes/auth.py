@@ -5,12 +5,20 @@ from quart import Blueprint, request, jsonify, current_app
 from passlib.hash import bcrypt
 from db import get_conn
 import jwt
+from jwt import PyJWKClient
 import datetime
 from quart.wrappers.response import Response
 from quart.utils import run_sync
 from werkzeug.security import check_password_hash, generate_password_hash
 from typing import Optional
 from services.email_service import send_verification_email, send_password_reset_email
+
+APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
+APPLE_TEAM_ID = "V3VDNCJULN"
+APPLE_BUNDLE_ID = "com.ushuaia360.ios"
+
+GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+GOOGLE_ISSUER = "https://accounts.google.com"
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -567,6 +575,153 @@ async def forgot_password():
         return jsonify({"error": "Error al enviar el email"}), 500
 
     return jsonify({"message": "Si el email existe, se envió un enlace para restablecer la contraseña"})
+
+
+# Apple Sign-In (Mobile)
+@auth_bp.route("/apple-app", methods=["POST"])
+async def apple_login_app():
+    """Login/register with Apple Sign-In for mobile app"""
+    data = await request.get_json()
+    identity_token = data.get("identity_token")
+    full_name = data.get("full_name")
+
+    if not identity_token:
+        return jsonify({"error": "identity_token requerido"}), 400
+
+    try:
+        jwks_client = PyJWKClient(APPLE_JWKS_URL)
+        signing_key = jwks_client.get_signing_key_from_jwt(identity_token)
+        claims = jwt.decode(
+            identity_token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=APPLE_BUNDLE_ID,
+        )
+        apple_user_id = claims["sub"]
+        email = claims.get("email")
+    except Exception as e:
+        current_app.logger.error(f"Apple token validation failed: {e}")
+        return jsonify({"error": "Token de Apple inválido"}), 401
+
+    async with get_conn() as conn:
+        user = await conn.fetchrow(
+            "SELECT * FROM users WHERE apple_user_id = $1", apple_user_id
+        )
+
+        if not user and email:
+            user = await conn.fetchrow(
+                "SELECT * FROM users WHERE email = $1", email.lower()
+            )
+            if user:
+                await conn.execute(
+                    "UPDATE users SET apple_user_id = $1 WHERE id = $2",
+                    apple_user_id, user["id"]
+                )
+
+        if not user:
+            name = full_name or (email.split("@")[0] if email else "Usuario Apple")
+            user_email = (email or f"{apple_user_id}@privaterelay.appleid.com").lower()
+            await conn.execute(
+                """
+                INSERT INTO users (email, full_name, apple_user_id, email_verified, language)
+                VALUES ($1, $2, $3, TRUE, 'es')
+                """,
+                user_email, name, apple_user_id
+            )
+            user = await conn.fetchrow(
+                "SELECT * FROM users WHERE apple_user_id = $1", apple_user_id
+            )
+
+    token = generate_jwt_token(str(user["id"]))
+    return jsonify({
+        "token": token,
+        "user": {
+            "id": str(user["id"]),
+            "email": user["email"],
+            "full_name": user["full_name"],
+            "avatar_url": user.get("avatar_url"),
+            "language": user.get("language", "es"),
+            "is_admin": user.get("is_admin", False),
+            "is_premium": user.get("is_premium", False),
+        }
+    })
+
+
+# Google Sign-In (Mobile)
+@auth_bp.route("/google-app", methods=["POST"])
+async def google_login_app():
+    """Login/register with Google Sign-In for mobile app"""
+    data = await request.get_json()
+    id_token = data.get("id_token")
+
+    if not id_token:
+        return jsonify({"error": "id_token requerido"}), 400
+
+    google_web_client_id = current_app.config.get("GOOGLE_WEB_CLIENT_ID")
+    if not google_web_client_id:
+        current_app.logger.error("GOOGLE_WEB_CLIENT_ID no configurado")
+        return jsonify({"error": "Google Sign-In no configurado"}), 500
+
+    try:
+        jwks_client = PyJWKClient(GOOGLE_JWKS_URL)
+        signing_key = jwks_client.get_signing_key_from_jwt(id_token)
+        claims = jwt.decode(
+            id_token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=google_web_client_id,
+            issuer=GOOGLE_ISSUER,
+        )
+        google_user_id = claims["sub"]
+        email = claims.get("email")
+        full_name = claims.get("name")
+        avatar_url = claims.get("picture")
+    except Exception as e:
+        current_app.logger.error(f"Google token validation failed: {e}")
+        return jsonify({"error": "Token de Google inválido"}), 401
+
+    async with get_conn() as conn:
+        user = await conn.fetchrow(
+            "SELECT * FROM users WHERE google_user_id = $1", google_user_id
+        )
+
+        if not user and email:
+            user = await conn.fetchrow(
+                "SELECT * FROM users WHERE email = $1", email.lower()
+            )
+            if user:
+                await conn.execute(
+                    "UPDATE users SET google_user_id = $1 WHERE id = $2",
+                    google_user_id, user["id"]
+                )
+
+        if not user:
+            name = full_name or (email.split("@")[0] if email else "Usuario Google")
+            user_email = (email or f"{google_user_id}@google.com").lower()
+            await conn.execute(
+                """
+                INSERT INTO users (email, full_name, google_user_id, avatar_url, email_verified, language)
+                VALUES ($1, $2, $3, $4, TRUE, 'es')
+                """,
+                user_email, name, google_user_id, avatar_url
+            )
+            user = await conn.fetchrow(
+                "SELECT * FROM users WHERE google_user_id = $1", google_user_id
+            )
+
+    token = generate_jwt_token(str(user["id"]))
+    return jsonify({
+        "token": token,
+        "user": {
+            "id": str(user["id"]),
+            "email": user["email"],
+            "full_name": user["full_name"],
+            "avatar_url": user.get("avatar_url"),
+            "language": user.get("language", "es"),
+            "is_admin": user.get("is_admin", False),
+            "is_premium": user.get("is_premium", False),
+        }
+    })
 
 
 # Logout
