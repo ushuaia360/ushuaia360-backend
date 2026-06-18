@@ -15,6 +15,7 @@ from routes.uploads import uploads_bp
 from routes.dashboard import dashboard_bp
 from routes.subscriptions import subscriptions_bp
 from routes.search import search_bp
+from routes.reports import reports_bp
 
 def register_routes(app):
     """Registra todos los blueprints de rutas"""
@@ -54,3 +55,6 @@ def register_routes(app):
 
     # Webhooks externos
     app.register_blueprint(subscriptions_bp, url_prefix='/api/v1')
+
+    # Reportes (app móvil → panel admin)
+    app.register_blueprint(reports_bp, url_prefix='/api/v1')
