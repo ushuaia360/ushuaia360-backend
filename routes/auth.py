@@ -184,6 +184,7 @@ async def login():
     # Create response with user data
     response: Response = await run_sync(jsonify)({
         "message": "Login exitoso",
+        "token": token,
         "user": {
             "id": str(user["id"]),
             "email": user["email"],
@@ -258,8 +259,12 @@ async def login_app():
 # Get current user (Web - from cookies)
 @auth_bp.route("/me", methods=["GET"])
 async def me():
-    """Get current user from cookie (web)"""
+    """Get current user from cookie or Authorization header (web)"""
     token = request.cookies.get("token")
+    if not token:
+        authz = request.headers.get("Authorization", "")
+        if authz.startswith("Bearer "):
+            token = authz.split(" ", 1)[1].strip()
     if not token:
         return jsonify({"error": "No autenticado"}), 401
 
