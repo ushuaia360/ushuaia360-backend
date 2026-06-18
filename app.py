@@ -37,7 +37,9 @@ def create_app(config_class=Config):
         )
     
     # Habilitar CORS
-    app = cors(app, allow_origin=app.config.get('CORS_ORIGINS', '*'), allow_credentials=True)
+    cors_origins = app.config.get('CORS_ORIGINS', ['*'])
+    allow_creds = '*' not in cors_origins
+    app = cors(app, allow_origin=cors_origins, allow_credentials=allow_creds)
     
     # Inicializar base de datos
     @app.before_serving
