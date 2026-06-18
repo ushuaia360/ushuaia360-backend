@@ -1878,13 +1878,14 @@ async def update_trail_point_media(trail_id: str, point_id: str, media_id: str, 
 
     set_clause = ", ".join(f"{k} = ${i+3}" for i, k in enumerate(updates))
     values = [media_uuid, point_uuid] + list(updates.values())
+    trail_param_num = len(values) + 1
 
     async with get_conn() as conn:
         result = await conn.execute(
             f"""
             UPDATE trail_media SET {set_clause}
             WHERE id = $1 AND trail_point_id = $2
-            AND EXISTS (SELECT 1 FROM trail_points WHERE id = $2 AND trail_id = $3)
+            AND EXISTS (SELECT 1 FROM trail_points WHERE id = $2 AND trail_id = ${trail_param_num})
             """,
             *values, trail_uuid,
         )
