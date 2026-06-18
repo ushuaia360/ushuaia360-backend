@@ -664,24 +664,34 @@ async def google_login_app():
         return jsonify({"error": "Google Sign-In no configurado"}), 500
 
     # Aceptar tanto el web client ID como el iOS client ID como audiencias válidas
-    valid_audiences = [a for a in [google_web_client_id, google_ios_client_id] if a]
+    valid_audiences = {a for a in [google_web_client_id, google_ios_client_id] if a}
 
     try:
         jwks_client = PyJWKClient(GOOGLE_JWKS_URL)
         signing_key = jwks_client.get_signing_key_from_jwt(id_token)
+        # Verificamos firma e issuer; la audiencia la chequeamos manualmente
+        # para soportar tanto el iOS client ID como el web client ID
         claims = jwt.decode(
             id_token,
             signing_key.key,
             algorithms=["RS256"],
-            audience=valid_audiences,
+            options={"verify_aud": False},
             issuer=GOOGLE_ISSUER,
         )
+        token_aud = claims.get("aud")
+        aud_set = set(token_aud) if isinstance(token_aud, list) else {token_aud}
+        if not aud_set & valid_audiences:
+            current_app.logger.error(
+                f"Google token audience mismatch. token_aud={token_aud} valid={valid_audiences}"
+            )
+            return jsonify({"error": "Token de Google inválido"}), 401
+
         google_user_id = claims["sub"]
         email = claims.get("email")
         full_name = claims.get("name")
         avatar_url = claims.get("picture")
     except Exception as e:
-        current_app.logger.error(f"Google token validation failed: {e}")
+        current_app.logger.error(f"Google token validation failed: {type(e).__name__}: {e}")
         return jsonify({"error": "Token de Google inválido"}), 401
 
     async with get_conn() as conn:
