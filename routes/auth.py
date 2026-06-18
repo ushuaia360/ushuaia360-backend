@@ -201,7 +201,7 @@ async def login():
         "token",
         token,
         httponly=True,
-        samesite="Lax",
+        samesite="None" if is_secure else "Lax",
         secure=is_secure,
         path="/",
         max_age=60 * 60 * 24 * 14  # 14 days
