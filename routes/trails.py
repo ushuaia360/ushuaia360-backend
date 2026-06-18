@@ -1621,7 +1621,7 @@ async def update_trail_media(trail_id: str, media_id: str, user_id: str):
     except ValueError:
         return jsonify({"error": "ID inválido"}), 400
 
-    data = request.get_json()
+    data = await request.get_json()
     if not data:
         return jsonify({"error": "Body requerido"}), 400
 
@@ -1860,7 +1860,7 @@ async def update_trail_point_media(trail_id: str, point_id: str, media_id: str, 
     except ValueError:
         return jsonify({"error": "ID inválido"}), 400
 
-    data = request.get_json()
+    data = await request.get_json()
     if not data:
         return jsonify({"error": "Body requerido"}), 400
 
