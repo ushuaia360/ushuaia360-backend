@@ -1849,6 +1849,51 @@ async def create_trail_point_media(trail_id: str, point_id: str, user_id: str):
         }), 201
 
 
+@trails_bp.route("/trails/<trail_id>/points/<point_id>/media/<media_id>", methods=["PUT", "PATCH"])
+@require_admin
+async def update_trail_point_media(trail_id: str, point_id: str, media_id: str, user_id: str):
+    """Actualizar media de un punto de interés (ej. cambiar media_type)"""
+    try:
+        trail_uuid = uuid.UUID(trail_id)
+        point_uuid = uuid.UUID(point_id)
+        media_uuid = uuid.UUID(media_id)
+    except ValueError:
+        return jsonify({"error": "ID inválido"}), 400
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Body requerido"}), 400
+
+    valid_types = ["image", "photo_360", "photo_180", "video"]
+    updates = {}
+    if "media_type" in data:
+        if data["media_type"] not in valid_types:
+            return jsonify({"error": f"media_type debe ser uno de: {', '.join(valid_types)}"}), 400
+        updates["media_type"] = data["media_type"]
+    if "order_index" in data:
+        updates["order_index"] = data["order_index"]
+
+    if not updates:
+        return jsonify({"error": "Nada que actualizar"}), 400
+
+    set_clause = ", ".join(f"{k} = ${i+3}" for i, k in enumerate(updates))
+    values = [media_uuid, point_uuid] + list(updates.values())
+
+    async with get_conn() as conn:
+        result = await conn.execute(
+            f"""
+            UPDATE trail_media SET {set_clause}
+            WHERE id = $1 AND trail_point_id = $2
+            AND EXISTS (SELECT 1 FROM trail_points WHERE id = $2 AND trail_id = $3)
+            """,
+            *values, trail_uuid,
+        )
+        if result == "UPDATE 0":
+            return jsonify({"error": "Media no encontrado o no pertenece al punto"}), 404
+
+    return jsonify({"message": "Media actualizado"}), 200
+
+
 @trails_bp.route("/trails/<trail_id>/points/<point_id>/media/<media_id>", methods=["DELETE"])
 @require_admin
 async def delete_trail_point_media(trail_id: str, point_id: str, media_id: str, user_id: str):
