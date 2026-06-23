@@ -16,6 +16,7 @@ from routes.dashboard import dashboard_bp
 from routes.subscriptions import subscriptions_bp
 from routes.search import search_bp
 from routes.reports import reports_bp
+from routes.wallpapers import wallpapers_bp
 
 def register_routes(app):
     """Registra todos los blueprints de rutas"""
@@ -58,3 +59,6 @@ def register_routes(app):
 
     # Reportes (app móvil → panel admin)
     app.register_blueprint(reports_bp, url_prefix='/api/v1')
+
+    # Wallpapers
+    app.register_blueprint(wallpapers_bp, url_prefix='/api/v1')

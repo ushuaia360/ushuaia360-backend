@@ -12,6 +12,8 @@ class Wallpaper(BaseModel):
         super().__init__(**kwargs)
         self.id = kwargs.get('id')
         self.url = kwargs.get('url')
+        self.title = kwargs.get('title')
+        self.order_index = kwargs.get('order_index', 0)
         self.is_premium = kwargs.get('is_premium', False)
         self.created_at = kwargs.get('created_at')
     

@@ -819,17 +819,30 @@ async def delete_trail(trail_id: str, user_id: str):
         return jsonify({"error": "ID de trail inválido"}), 400
     
     async with get_conn() as conn:
-        # Verificar que el trail existe
         trail = await conn.fetchrow("SELECT id FROM trails WHERE id = $1", trail_uuid)
         if not trail:
             return jsonify({"error": "Trail no encontrado"}), 404
-        
-        # Eliminar el trail (las foreign keys deberían manejar las relaciones)
-        await conn.execute("DELETE FROM trails WHERE id = $1", trail_uuid)
-        
-        return jsonify({
-            "message": "Trail eliminado exitosamente"
-        }), 200
+
+        async with conn.transaction():
+            await conn.execute("DELETE FROM user_trail_history WHERE trail_id = $1", trail_uuid)
+            await conn.execute("DELETE FROM trail_reviews WHERE trail_id = $1", trail_uuid)
+            await conn.execute("DELETE FROM user_favorites WHERE entity_type = 'trail' AND entity_id = $1", trail_uuid)
+            await conn.execute("DELETE FROM reports WHERE target_type = 'trail' AND target_id = $1", trail_uuid)
+            await conn.execute(
+                "DELETE FROM trail_media WHERE trail_point_id IN (SELECT id FROM trail_points WHERE trail_id = $1)",
+                trail_uuid,
+            )
+            await conn.execute("DELETE FROM trail_points WHERE trail_id = $1", trail_uuid)
+            await conn.execute("DELETE FROM trail_emergency_points WHERE trail_id = $1", trail_uuid)
+            await conn.execute(
+                "DELETE FROM route_segments WHERE route_id IN (SELECT id FROM trail_routes WHERE trail_id = $1)",
+                trail_uuid,
+            )
+            await conn.execute("DELETE FROM trail_routes WHERE trail_id = $1", trail_uuid)
+            await conn.execute("DELETE FROM trail_media WHERE trail_id = $1", trail_uuid)
+            await conn.execute("DELETE FROM trails WHERE id = $1", trail_uuid)
+
+        return jsonify({"message": "Trail eliminado exitosamente"}), 200
 
 
 @trails_bp.route("/trails/<trail_id>/routes", methods=["POST"])
