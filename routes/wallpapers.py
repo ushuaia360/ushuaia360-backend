@@ -29,7 +29,7 @@ async def list_wallpapers():
         async with get_conn() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, url, title, order_index, created_at
+                SELECT id, url, title, orientation, order_index, created_at
                 FROM wallpapers
                 ORDER BY order_index ASC, created_at DESC
                 LIMIT $1 OFFSET $2
@@ -69,17 +69,21 @@ async def create_wallpaper(user_id: str):
     url = data["url"].strip()
     title = (data.get("title") or "").strip() or None
     order_index = int(data.get("order_index") or 0)
+    orientation = data.get("orientation", "vertical")
+    if orientation not in ("vertical", "horizontal"):
+        orientation = "vertical"
 
     try:
         async with get_conn() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO wallpapers (url, title, order_index)
-                VALUES ($1, $2, $3)
-                RETURNING id, url, title, order_index, created_at
+                INSERT INTO wallpapers (url, title, orientation, order_index)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id, url, title, orientation, order_index, created_at
                 """,
                 url,
                 title,
+                orientation,
                 order_index,
             )
     except asyncpg.exceptions.PostgresError as e:
@@ -109,6 +113,9 @@ async def update_wallpaper(wallpaper_id: str, user_id: str):
         updates["title"] = (data["title"] or "").strip() or None
     if "order_index" in data:
         updates["order_index"] = int(data["order_index"] or 0)
+    if "orientation" in data:
+        v = data["orientation"]
+        updates["orientation"] = v if v in ("vertical", "horizontal") else "vertical"
 
     if not updates:
         return jsonify({"error": "Sin campos a actualizar"}), 400
@@ -122,7 +129,7 @@ async def update_wallpaper(wallpaper_id: str, user_id: str):
                 f"""
                 UPDATE wallpapers SET {set_clause}
                 WHERE id = $1
-                RETURNING id, url, title, order_index, created_at
+                RETURNING id, url, title, orientation, order_index, created_at
                 """,
                 *values,
             )
