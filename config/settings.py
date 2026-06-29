@@ -30,7 +30,7 @@ class Config:
     
     # JWT
     JWT_SECRET = os.getenv('JWT_SECRET', SECRET_KEY)
-    JWT_EXPIRATION_SECONDS = int(os.getenv('JWT_EXPIRATION_SECONDS', 60 * 60 * 24 * 14))  # 14 days
+    JWT_EXPIRATION_SECONDS = int(os.getenv('JWT_EXPIRATION_SECONDS', 60 * 60 * 24 * 365))  # 1 year
     
     # Resend
     RESEND_API_KEY = os.getenv('RESEND_API_KEY')

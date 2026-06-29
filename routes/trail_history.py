@@ -43,17 +43,20 @@ def _ensure_aware_utc(dt):
     return dt.astimezone(timezone.utc)
 
 
-def _serialize_entry(row) -> dict:
+def _serialize_entry(row, include_gps_path: bool = False) -> dict:
     d = dict(row)
     started = d.get('started_at')
     finished = d.get('finished_at')
-    return {
+    result = {
         'id': str(d['id']),
         'trail_id': str(d['trail_id']),
         'started_at': _utc_iso(started),
         'completed_at': _utc_iso(finished),
         'status': 'completed' if d.get('completed') else 'in_progress',
     }
+    if include_gps_path:
+        result['gps_path'] = d.get('gps_path')
+    return result
 
 
 def _entry_response(row_with_db_now: dict):
@@ -167,17 +170,37 @@ async def trail_history_complete(user_id: str, history_id: str):
     except ValueError:
         return jsonify({'error': 'ID inválido'}), 400
 
+    import json as _json
+    data = await request.get_json(silent=True) or {}
+    raw_gps = data.get('gps_path')
+    # Validar que sea una lista de objetos {latitude, longitude}
+    gps_path = None
+    if isinstance(raw_gps, list) and len(raw_gps) >= 2:
+        valid = [
+            p for p in raw_gps
+            if isinstance(p, dict)
+            and isinstance(p.get('latitude'), (int, float))
+            and isinstance(p.get('longitude'), (int, float))
+        ]
+        if len(valid) >= 2:
+            gps_path = _json.dumps([
+                {'latitude': p['latitude'], 'longitude': p['longitude']}
+                for p in valid
+            ])
+
     async with get_conn() as conn:
         row = await conn.fetchrow(
             """
             UPDATE user_trail_history
             SET completed = TRUE,
-                finished_at = COALESCE(finished_at, NOW())
+                finished_at = COALESCE(finished_at, NOW()),
+                gps_path = COALESCE($3::jsonb, gps_path)
             WHERE id = $1 AND user_id = $2
-            RETURNING id, trail_id, started_at, finished_at, completed, NOW() AS db_now
+            RETURNING id, trail_id, started_at, finished_at, completed, gps_path, NOW() AS db_now
             """,
             hid,
             uid,
+            gps_path,
         )
         if not row:
             return jsonify({'error': 'Entrada no encontrada'}), 404
@@ -225,6 +248,38 @@ ORDER BY lp.last_completed_at DESC
         ),
         200,
     )
+
+
+@trail_history_bp.route('/me/trail-history/by-trail/<trail_id>', methods=['GET'])
+@require_auth
+async def trail_history_by_trail(user_id: str, trail_id: str):
+    """
+    Devuelve la entrada más reciente (completada) del usuario para un sendero,
+    incluyendo la ruta GPS grabada. Útil para mostrar el recorrido real en el mapa.
+    """
+    try:
+        uid = uuid.UUID(user_id)
+        tid = uuid.UUID(trail_id)
+    except ValueError:
+        return jsonify({'error': 'ID inválido'}), 400
+
+    async with get_conn() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, trail_id, started_at, finished_at, completed, gps_path
+            FROM user_trail_history
+            WHERE user_id = $1 AND trail_id = $2 AND completed = TRUE
+            ORDER BY finished_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            uid,
+            tid,
+        )
+
+    if not row:
+        return jsonify({'entry': None}), 200
+
+    return jsonify({'entry': _serialize_entry(row, include_gps_path=True)}), 200
 
 
 @trail_history_bp.route('/me/trail-history', methods=['GET'])
