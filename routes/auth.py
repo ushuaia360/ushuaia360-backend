@@ -324,6 +324,64 @@ async def me_app():
     return jsonify({"user": user_dict})
 
 
+@auth_bp.route("/profile", methods=["PATCH"])
+async def update_profile():
+    """Update full_name and/or avatar_url — mobile app."""
+    token = request.cookies.get("token")
+    if not token:
+        authz = request.headers.get("Authorization", "")
+        if authz.startswith("Bearer "):
+            token = authz.split(" ", 1)[1].strip()
+    if not token:
+        return jsonify({"error": "No autenticado"}), 401
+
+    try:
+        payload = decode_jwt_token(token)
+        user_id = payload["user_id"]
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 401
+
+    data = await request.get_json(silent=True) or {}
+    full_name = data.get("full_name")
+    avatar_url = data.get("avatar_url")
+
+    if full_name is None and avatar_url is None:
+        return jsonify({"error": "Nada que actualizar"}), 400
+
+    if full_name is not None and (not isinstance(full_name, str) or not full_name.strip()):
+        return jsonify({"error": "Nombre inválido"}), 422
+
+    updates = []
+    params: list = []
+    idx = 1
+    if full_name is not None:
+        updates.append(f"full_name = ${idx}")
+        params.append(full_name.strip())
+        idx += 1
+    if avatar_url is not None:
+        updates.append(f"avatar_url = ${idx}")
+        params.append(avatar_url.strip() if avatar_url else None)
+        idx += 1
+
+    params.append(user_id)
+
+    async with get_conn() as conn:
+        user = await conn.fetchrow(
+            f"""
+            UPDATE users SET {', '.join(updates)}
+            WHERE id = ${idx}
+            RETURNING id, email, full_name, avatar_url, language, is_admin, is_premium, email_verified, created_at
+            """,
+            *params,
+        )
+        if not user:
+            return jsonify({"error": "Usuario no encontrado"}), 404
+
+    user_dict = dict(user)
+    user_dict["id"] = str(user_dict["id"])
+    return jsonify({"user": user_dict})
+
+
 # Get all users
 @auth_bp.route("/users", methods=["GET"])
 async def get_users():

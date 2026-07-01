@@ -105,3 +105,70 @@ async def upload_review_image(user_id: str):
 
     public_url = f"{base}/storage/v1/object/public/{REVIEWS_BUCKET}/{object_path}"
     return jsonify({"url": public_url}), 201
+
+
+AVATARS_BUCKET = "avatars"
+MAX_AVATAR_BYTES = 5 * 1024 * 1024
+
+
+@uploads_bp.route("/uploads/avatar", methods=["POST"])
+@require_auth
+async def upload_avatar(user_id: str):
+    """Upload or replace the caller's profile photo → public avatars bucket."""
+    files = await request.files
+    f = files.get("file") if files else None
+    if f is None or not getattr(f, "filename", None):
+        return jsonify({"error": "Campo multipart file requerido"}), 400
+
+    content_type = (f.content_type or "").split(";")[0].strip().lower()
+    if content_type == "image/jpg":
+        content_type = "image/jpeg"
+    if content_type not in ALLOWED_TYPES:
+        return jsonify({"error": "Tipo de archivo no permitido"}), 400
+
+    data = f.read()
+    if not data:
+        return jsonify({"error": "Archivo vacío"}), 400
+    if len(data) > MAX_AVATAR_BYTES:
+        return jsonify({"error": "Imagen demasiado grande (máx. 5 MB)"}), 400
+
+    base, service_key = _review_upload_prefix()
+    if not base or not service_key:
+        return jsonify({"error": "Almacenamiento no configurado"}), 503
+
+    ext = ".webp"
+    if content_type == "image/jpeg":
+        ext = ".jpg"
+    elif content_type == "image/png":
+        ext = ".png"
+
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        return jsonify({"error": "Usuario inválido"}), 400
+
+    # Fixed path per user so each upload overwrites the previous avatar
+    object_path = f"{uid}/avatar{ext}"
+    upload_url = f"{base}/storage/v1/object/{AVATARS_BUCKET}/{object_path}"
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(
+                upload_url,
+                content=data,
+                headers={
+                    "Authorization": f"Bearer {service_key}",
+                    "apikey": service_key,
+                    "Content-Type": content_type,
+                    "x-upsert": "true",
+                },
+            )
+    except httpx.RequestError as e:
+        return jsonify({"error": "Error al contactar almacenamiento", "detail": str(e)}), 502
+
+    if res.status_code not in (200, 201):
+        detail = res.text[:500] if res.text else ""
+        return jsonify({"error": "No se pudo subir la imagen", "status": res.status_code, "detail": detail}), 502
+
+    public_url = f"{base}/storage/v1/object/public/{AVATARS_BUCKET}/{object_path}"
+    return jsonify({"url": public_url}), 201
