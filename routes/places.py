@@ -22,6 +22,7 @@ VALID_CATEGORIES = {
     "categoria_1",
     "categoria_2",
     "categoria_3",
+    "turistico",
     "naturaleza",
     "patrimonio",
     "miradores",
