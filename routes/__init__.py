@@ -18,6 +18,7 @@ from routes.search import search_bp
 from routes.reports import reports_bp
 from routes.wallpapers import wallpapers_bp
 from routes.app_config import app_config_bp
+from routes.legal import legal_bp
 
 def register_routes(app):
     """Registra todos los blueprints de rutas"""
@@ -66,3 +67,6 @@ def register_routes(app):
 
     # Estado de la app (mantenimiento / actualización requerida)
     app.register_blueprint(app_config_bp, url_prefix='/api/v1')
+
+    # Documentos legales (términos y privacidad)
+    app.register_blueprint(legal_bp, url_prefix='/api/v1')
