@@ -19,6 +19,7 @@ from routes.reports import reports_bp
 from routes.wallpapers import wallpapers_bp
 from routes.app_config import app_config_bp
 from routes.legal import legal_bp
+from routes.featured import featured_bp
 
 def register_routes(app):
     """Registra todos los blueprints de rutas"""
@@ -70,3 +71,6 @@ def register_routes(app):
 
     # Documentos legales (términos y privacidad)
     app.register_blueprint(legal_bp, url_prefix='/api/v1')
+
+    # Destacados (senderos + puntos turísticos) — panel Partners
+    app.register_blueprint(featured_bp, url_prefix='/api/v1')
