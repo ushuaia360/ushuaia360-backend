@@ -17,19 +17,24 @@ places_bp = Blueprint("places", __name__)
 
 
 # Debe alinearse con ushuaia360-frontend `src/lib/placeCategories.ts` (y app móvil `place-category-map.ts`).
-# Se mantienen categoria_1/2/3 por registros antiguos.
+# Se mantienen categoria_1/2/3, turistico, patrimonio, cultura y otros por registros antiguos
+# (ya no se ofrecen como opción en los formularios, ver placeCategories.ts).
 VALID_CATEGORIES = {
     "categoria_1",
     "categoria_2",
     "categoria_3",
     "turistico",
-    "naturaleza",
     "patrimonio",
+    "cultura",
+    "otros",
+    "turismo",
+    "naturaleza",
+    "historia",
     "miradores",
     "costa",
-    "cultura",
     "gastronomia",
-    "otros",
+    "hospedaje",
+    "compras",
 }
 
 
